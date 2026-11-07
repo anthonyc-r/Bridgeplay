@@ -35,6 +35,22 @@ The DXVK option has not been run through this smoke-test script. The probe sourc
 `d3d11-smoke.c`; generated executables are not tracked. Passing these small checks does
 not establish game stability.
 
+## Geometry pipeline regression probe
+
+`d3d11-geometry-smoke.c` creates 16×16 offscreen triangles through ordinary
+vertex/pixel shaders and DXMT's geometry-shader emulation. It draws a red control,
+then uses the same geometry shader first with a constant blue pixel shader and
+then with a green varying-input pixel shader. Center and background pixels must
+match after each draw. Completion and nonblocking readback share a bounded timeout.
+
+Build with either MinGW compiler and `-ld3dcompiler_47 -O2 -Wall -Wextra -Werror`.
+With Microsoft's native compiler DLL, `--compile-only output-directory` exports
+all four shader fixtures without a graphics device. `--run 10000` performs the
+three draws; run it in a disposable prefix with the intended renderer and an
+external process timeout. Both architectures passed all three draws on the
+Radeon Pro 5700 XT with the guarded DXMT build. These synthetic draws do not
+reproduce Chained Together's failing cached geometry pipeline.
+
 ## Buffer bounds regression probe
 
 `d3d11-buffer-bounds.c` and `d3d11-buffer-bounds.hlsl` exercise raw and structured
