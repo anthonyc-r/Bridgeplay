@@ -13,6 +13,12 @@ enum SetupChecks {
         return sysctlbyname("hw.optional.arm64", &value, &size, nil, 0) == 0 && value == 1
     }
 
+    static var nativeIntegrationAvailable: Bool {
+        if isAppleSilicon { return true }
+        guard let root = try? InstallPayload.root() else { return false }
+        return InstallPayload.hasIntelComponents(root: root)
+    }
+
     static var macOSVersion: OperatingSystemVersion { ProcessInfo.processInfo.operatingSystemVersion }
 
     static var macOSDisplay: String {

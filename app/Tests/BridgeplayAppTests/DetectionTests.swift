@@ -123,7 +123,7 @@ struct CompatToolOrderTests {
     func order() throws {
         let tools = SupportedRunners.tools(for: [
             try build("26.3.0.39832"), try build("27.0.0.40921-fex"),
-        ])
+        ], fexAvailable: true)
         #expect(tools.map(\.name) == ["bridgeplay-proton-fex", "bridgeplay-proton-fex-rosetta", "bridgeplay-proton-26.3"])
         #expect(tools.map(\.build) == ["27.0.0.40921-fex", "27.0.0.40921-fex", "26.3.0.39832"])
     }
@@ -141,7 +141,7 @@ struct CompatToolOrderTests {
     func bothPreviews() throws {
         let tools = SupportedRunners.tools(for: [
             try build("27.0.0.40921-fex"), try build("27.0.0.40921"),
-        ])
+        ], fexAvailable: true)
         #expect(tools.map(\.name) == ["bridgeplay-proton-fex", "bridgeplay-proton-fex-rosetta", "bridgeplay-proton-preview"])
         #expect(tools.map(\.build) == ["27.0.0.40921-fex", "27.0.0.40921-fex", "27.0.0.40921"])
         #expect(Set(tools.map(\.display)).count == tools.count)
@@ -157,10 +157,10 @@ struct CompatToolOrderTests {
     @Test("A named holder keeps the legacy name, and nobody leaves every Preview on its own name")
     func explicitHolder() throws {
         let builds = [try build("27.0.0.40921-fex"), try build("27.0.0.40921")]
-        let held = SupportedRunners.tools(for: builds, legacy: .build("27.0.0.40921"))
+        let held = SupportedRunners.tools(for: builds, legacy: .build("27.0.0.40921"), fexAvailable: true)
         #expect(held.map(\.name) == ["bridgeplay-proton", "bridgeplay-proton-fex", "bridgeplay-proton-fex-rosetta"])
         #expect(held.first?.build == "27.0.0.40921")
-        let none = SupportedRunners.tools(for: builds, legacy: .nobody)
+        let none = SupportedRunners.tools(for: builds, legacy: .nobody, fexAvailable: true)
         #expect(none.map(\.name) == ["bridgeplay-proton-fex", "bridgeplay-proton-fex-rosetta", "bridgeplay-proton-preview"])
     }
 
@@ -222,7 +222,7 @@ struct SupportPathTests {
         #expect(support.hasSuffix("/Library/Application Support/bridgeplay"))
 
         #expect(SupportPaths.signatures.path(percentEncoded: false)
-            .hasSuffix("/bridgeplay/signatures/macos.arm64"))
+            .hasSuffix("/bridgeplay/\(SupportPaths.signatureSubpath)"))
         #expect(SupportPaths.overlayShim.path(percentEncoded: false)
             .hasSuffix("/bridgeplay/overlay-shim.dylib"))
         #expect(SupportPaths.toolList.path(percentEncoded: false)

@@ -3,6 +3,9 @@ import Foundation
 @main
 enum Launch {
     static func main() {
+        if CommandLine.arguments.dropFirst().contains(CheckComponentsCommand.flag) {
+            CheckComponentsCommand.run()
+        }
         // A game launch is waiting on this one: post and leave before anything else runs.
         if let parts = NotifyCommand.requested() { NotifyCommand.run(parts) }
         if CommandLine.arguments.dropFirst().first == LaunchProgressCommand.flag {

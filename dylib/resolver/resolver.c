@@ -5,11 +5,14 @@
 #include "aob.h"
 #include "../core/macho.h"
 #include "../util/log.h"
+#include "../util/arch.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <uuid/uuid.h>
 
 // Prologue detection
+#if !NP_INTEL
 static const struct { uint32_t mask, val; } prologue_forms[] = {
     { 0xFF0003FF, 0xD10003FF },  // SUB  SP, SP, #imm
     { 0xFFC07FFF, 0xA9007BFD },  // STP  x29, x30, [SP, #off]
@@ -19,15 +22,21 @@ static const struct { uint32_t mask, val; } prologue_forms[] = {
     { 0xFFC003E0, 0xA98003E0 },  // STP  Xt, Xt2, [SP, #off]!
     { 0xFFC003E0, 0xA90003E0 },  // STP  Xt, Xt2, [SP, #off]
 };
+#endif
 
 int np_looks_like_prologue(uintptr_t addr) {
     if (!addr) return 0;
+#if NP_INTEL
+    const uint8_t *p = (const uint8_t *)addr;
+    return p[0] == 0x55 && p[1] == 0x48 && p[2] == 0x89 && p[3] == 0xe5;
+#else
     uint32_t w = *(const uint32_t *)addr;
     for (int i = 0; i < (int)(sizeof(prologue_forms) / sizeof(prologue_forms[0])); i++) {
         if ((w & prologue_forms[i].mask) == prologue_forms[i].val)
             return 1;
     }
     return 0;
+#endif
 }
 
 // Result accumulator
@@ -160,7 +169,7 @@ static uintptr_t try_anchor(np_sig_entry_t *sig,
 // address cannot be a hook site.
 static int usable_code_address(const char *name, uintptr_t addr,
                                uintptr_t text, size_t text_sz) {
-    if (addr & 3u) {
+    if (!NP_INTEL && (addr & 3u)) {
         NP_WARN("resolver: '%s' resolved to 0x%lx, not a 4-byte aligned "
                 "instruction address; rejecting", name, (unsigned long)addr);
         return 0;
@@ -186,11 +195,40 @@ int np_required_for_module(const np_sigdb_t *sigdb, const char *module) {
     return n;
 }
 
+static int profile_matches_image(const np_sigdb_t *profile,
+                                 const struct mach_header_64 *mh,
+                                 const char *module) {
+    if (!NP_INTEL) return 1;
+    const char *expected = strcmp(module, "steamclient.dylib") == 0 ? profile->client_uuid
+                         : strcmp(module, "steamui.dylib") == 0 ? profile->ui_uuid : "";
+    uuid_t uuid;
+    if (strcmp(profile->arch, "x86_64") != 0 || mh->cputype != CPU_TYPE_X86_64 ||
+        uuid_parse(expected, uuid) != 0) {
+        NP_ERR("resolver: Intel %s needs an x86_64 profile with a pinned image UUID", module);
+        return 0;
+    }
+    const uint8_t *cursor = (const uint8_t *)(mh + 1);
+    const uint8_t *end = cursor + mh->sizeofcmds;
+    for (uint32_t i = 0; i < mh->ncmds && (size_t)(end - cursor) >= sizeof(struct load_command); i++) {
+        const struct load_command *command = (const void *)cursor;
+        if (command->cmdsize < sizeof(*command) || command->cmdsize > (size_t)(end - cursor)) break;
+        if (command->cmd == LC_UUID && command->cmdsize >= sizeof(struct uuid_command)) {
+            const struct uuid_command *identity = (const void *)cursor;
+            if (memcmp(identity->uuid, uuid, sizeof(uuid)) == 0) return 1;
+            break;
+        }
+        cursor += command->cmdsize;
+    }
+    NP_ERR("resolver: %s differs from the validated Intel Steam build; hooks stay off", module);
+    return 0;
+}
+
 int np_resolve_signatures(const struct mach_header_64 *mh, intptr_t slide,
                       np_sigdb_t *sigdb, const char *module,
                       np_resolve_result_t *out) {
     if (!mh || !sigdb || !module || !out) return 0;
     memset(out, 0, sizeof(*out));
+    if (!profile_matches_image(sigdb, mh, module)) return 0;
 
     uintptr_t text;
     size_t text_sz;

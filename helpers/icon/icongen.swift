@@ -231,6 +231,31 @@ guard CommandLine.arguments.count == 3 else {
 }
 
 let strokes = loadMark(URL(fileURLWithPath: CommandLine.arguments[1]))
+let output = URL(fileURLWithPath: CommandLine.arguments[2])
+if output.pathExtension.lowercased() == "png" {
+    let context = CGContext(data: nil, width: Int(canvas), height: Int(canvas), bitsPerComponent: 8,
+                            bytesPerRow: 0, space: space,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    let bounds = CGRect(x: 0, y: 0, width: canvas, height: canvas)
+    context.addPath(CGPath(roundedRect: bounds.insetBy(dx: 60, dy: 60),
+                          cornerWidth: 200, cornerHeight: 200, transform: nil))
+    context.clip()
+    let colors = [CGColor(red: 0.114, green: 0.114, blue: 0.122, alpha: 1),
+                  CGColor(red: 0.031, green: 0.031, blue: 0.035, alpha: 1)] as CFArray
+    let gradient = CGGradient(colorsSpace: space, colors: colors, locations: [0, 1])!
+    context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: canvas), end: .zero, options: [])
+    context.setStrokeColor(CGColor(red: 0.961, green: 0.961, blue: 0.969, alpha: 1))
+    context.setLineCap(.round)
+    context.setLineJoin(.round)
+    for stroke in strokes {
+        context.setAlpha(stroke.opacity)
+        context.setLineWidth(stroke.width)
+        context.addPath(stroke.path)
+        context.strokePath()
+    }
+    write(context.makeImage()!, to: output)
+    exit(0)
+}
 let root = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
 let assets = root.appendingPathComponent("Assets", isDirectory: true)
 try? FileManager.default.removeItem(at: root)

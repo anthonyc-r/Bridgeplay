@@ -21,8 +21,17 @@ final class AppUpdater {
     // Sparkle's own install-and-relaunch for an update waiting for quit.
     @ObservationIgnored private var installNow: (() -> Void)?
 
+    static var updatesEnabled: Bool {
+        #if arch(x86_64)
+        false
+        #else
+        true
+        #endif
+    }
+
     init() {
-        #if DEBUG
+        #if DEBUG || arch(x86_64)
+        // The upstream release feed only carries Apple Silicon builds.
         let scheduling = false
         #else
         let scheduling = true
@@ -48,7 +57,7 @@ final class AppUpdater {
     // Sparkle ignores checkForUpdates during a session, and a download started in the
     // background is one, so a click here has to be answered or kept for later.
     func check() {
-        #if !DEBUG
+        #if !DEBUG && !arch(x86_64)
         let updater = controller.updater
         switch flow.click(busy: updater.sessionInProgress && !updater.canCheckForUpdates) {
         case .run: controller.checkForUpdates(nil)

@@ -8,6 +8,7 @@
 #include "../hooks/hooks.h"
 #include "../feats/compat.h"
 #include "../feats/input_access.h"
+#include "../util/arch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,7 +96,7 @@ static void sigdb_path_for(char *buf, size_t buf_size) {
     }
 
     char dir[512];
-    np_support_path(dir, sizeof(dir), home, "signatures/macos.arm64");
+    np_support_path(dir, sizeof(dir), home, "signatures/macos." NP_SIGNATURE_ARCH);
 
     if (pick_latest_sigdb(dir, buf, buf_size) == 0)
         return;

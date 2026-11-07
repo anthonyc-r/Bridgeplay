@@ -6,6 +6,7 @@
 #include "../feats/compat.h"
 #include "../feats/usershortcuts.h"
 #include "../util/log.h"
+#include "../util/arch.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -142,14 +143,19 @@ int np_hooks_install_all(const struct mach_header_64 *mh, intptr_t slide,
         np_lookup_address(resolved, "CCompatManager::FindMapping"),
         np_lookup_address(resolved, "CCompatManager::GetWildcardMapping"));
 
-    np_compat_probe_tool_layout(
+    int tool_layout = np_compat_probe_tool_layout(
         np_lookup_address(resolved, "CCompatManager::ResolveCompatToolForApp.local_redirect"),
         np_lookup_address(resolved, "CCompatManager::GetOSListOverrideForApp.oslist_gate"));
-    np_compat_probe_enabled_off(
+    int enabled_layout = np_compat_probe_enabled_off(
         np_lookup_address(resolved, "CCompatManager::BIsCompatibilityToolEnabled"));
-    np_compat_probe_windows_only_off(
+    int windows_layout = np_compat_probe_windows_only_off(
         np_lookup_address(resolved, "CCompatManager::GetWildcardMapping"),
         np_lookup_address(resolved, "CCompatManager::WindowsOnlyLookup"));
+    if (NP_INTEL && (!tool_layout || !enabled_layout || !windows_layout)) {
+        NP_ERR("hooks: Intel compatibility layout validation failed; no client hooks installed");
+        if (total_out) *total_out = 0;
+        return 0;
+    }
     np_usershortcuts_bind(mh, slide,
         np_lookup_address(resolved, "CUserShortcuts::SetShortcutExe"));
 
@@ -157,8 +163,13 @@ int np_hooks_install_all(const struct mach_header_64 *mh, intptr_t slide,
                                              "CWebUIJobDispatcher::RegisterHandler");
     uintptr_t dispatch_fn = np_lookup_address(resolved, "CWebUITransport::DispatchJob");
 
-    np_webui_init(mh, slide, register_fn, dispatch_fn,
-                  np_lookup_address(resolved, "CWebUIMsgJob::SendResponse"));
+    int webui_ready = np_webui_init(mh, slide, register_fn, dispatch_fn,
+                                   np_lookup_address(resolved, "CWebUIMsgJob::SendResponse"));
+    if (NP_INTEL && !webui_ready) {
+        NP_ERR("hooks: Intel WebUI validation failed; no client hooks installed");
+        if (total_out) *total_out = 0;
+        return 0;
+    }
     np_webui_dump_routes();
     np_hooks_webui_bind(mh, slide, register_fn, dispatch_fn);
 

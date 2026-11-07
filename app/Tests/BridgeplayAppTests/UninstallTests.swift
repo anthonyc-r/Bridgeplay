@@ -108,7 +108,7 @@ struct UninstallTests {
             source.path(percentEncoded: false),
         ])
         try Shell.check("/usr/bin/clang", [
-            "-dynamiclib",
+            "-dynamiclib", "-Wl,-adhoc_codesign",
             "-o", result.dylib.path(percentEncoded: false),
             source.path(percentEncoded: false),
         ])

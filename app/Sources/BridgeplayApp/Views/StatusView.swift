@@ -686,8 +686,8 @@ struct StatusView: View {
             let outdated = winecx == .outdated
             StatusRow(
                 title: "WineCX Engine",
-                value: "\(FreeEngineWinecx.current.runner.releaseVersion) with msync and D3DMetal, "
-                    + "no CrossOver license needed.",
+                value: "\(FreeEngineWinecx.current.runner.releaseVersion) with msync and "
+                    + (SetupChecks.isAppleSilicon ? "D3DMetal" : "DXMT") + ", no CrossOver license needed.",
                 tone: outdated ? .warning : .neutral,
                 action: StatusAction(
                     label: outdated ? "Update & Set Up" : "Download & Set Up",
@@ -697,24 +697,26 @@ struct StatusView: View {
                 ) { Task { await status.installWinecxEngine() } }
             )
         }
-        if let source = snapshot.gptkSource {
-            StatusRow(
-                title: "Game Porting Toolkit",
-                value: "Linked from \(source).",
-                tone: .ok
-            )
-        } else {
-            StatusRow(
-                title: "Game Porting Toolkit",
-                value: "Not found. Copy the redist/lib folder of Apple's Game Porting Toolkit to "
-                    + "~/Library/Application Support/\(SupportPaths.supportDirName)/gptk, then press Rescan.",
-                tone: .neutral,
-                action: StatusAction(
-                    label: "Rescan",
-                    help: "Look for the Game Porting Toolkit again and link it into the WineCX engine.",
-                    isEnabled: status.canInstall
-                ) { Task { await status.rescanGameportingToolkit() } }
-            )
+        if SetupChecks.isAppleSilicon {
+            if let source = snapshot.gptkSource {
+                StatusRow(
+                    title: "Game Porting Toolkit",
+                    value: "Linked from \(source).",
+                    tone: .ok
+                )
+            } else {
+                StatusRow(
+                    title: "Game Porting Toolkit",
+                    value: "Not found. Copy the redist/lib folder of Apple's Game Porting Toolkit to "
+                        + "~/Library/Application Support/\(SupportPaths.supportDirName)/gptk, then press Rescan.",
+                    tone: .neutral,
+                    action: StatusAction(
+                        label: "Rescan",
+                        help: "Look for the Game Porting Toolkit again and link it into the WineCX engine.",
+                        isEnabled: status.canInstall
+                    ) { Task { await status.rescanGameportingToolkit() } }
+                )
+            }
         }
         let tools = SupportedRunners.tools(for: snapshot.installedRunners)
         ForEach(rows) { row in

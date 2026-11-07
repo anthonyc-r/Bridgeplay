@@ -4,6 +4,7 @@
 #include "resolver.h"          // np_looks_like_prologue
 #include "../core/macho.h"     // np_find_segment, np_get_section_containing
 #include "../util/log.h"
+#include "../util/arch.h"
 
 #include <dlfcn.h>
 #include <string.h>
@@ -489,6 +490,9 @@ uintptr_t np_locate_anchor(const struct mach_header_64 *mh, intptr_t slide,
                             const np_anchor_t *anchor) {
     if (!mh || !anchor || !text_base || !text_size) return 0;
 
+    // Intel profiles use verified byte patterns until equivalent anchors exist.
+    if (NP_INTEL) return 0;
+
     if (anchor->kind == NP_MATCH_VTABLE_SLOT) {
         if (!anchor->va) return 0;
 
@@ -609,7 +613,7 @@ static uintptr_t vptr_from_typeinfo(const struct mach_header_64 *mh, intptr_t sl
             if (p[i - 1] != 0) continue;
             uintptr_t fn = p[i + 1];
             if (fn < text || fn >= text + text_sz) continue;
-            if (fn & 3) continue;
+            if (!NP_INTEL && (fn & 3)) continue;
             if (found) return 0;        // more than one primary vtable, give up
             found = base + (i + 1) * sizeof(uintptr_t);
         }

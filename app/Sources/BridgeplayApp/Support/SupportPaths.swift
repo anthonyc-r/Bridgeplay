@@ -65,8 +65,16 @@ enum SupportPaths {
     // Where Remove Everything moves the user's own overrides, outside the folder it deletes.
     static var keptGamefixes: URL { applicationSupport.appending(path: "\(supportDirName)-gamefixes") }
 
+    #if arch(x86_64)
+    static let signaturePlatform = "macos.x86_64"
+    #else
+    static let signaturePlatform = "macos.arm64"
+    #endif
+
+    static var signatureSubpath: String { "signatures/\(signaturePlatform)" }
+
     static var signatures: URL {
-        support.appending(path: "signatures/macos.arm64")
+        support.appending(path: signatureSubpath)
     }
 
     static var fonts: URL { support.appending(path: "fonts") }

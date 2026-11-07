@@ -362,12 +362,12 @@ struct PrefixToolsTests {
     func dialogNamesBothBuilds() throws {
         let source = try Self.compatSource()
 
-        // Written in compat_run.sh as: aa64) printf 'an arm64 (FEX) Wine engine' ;;
-        func name(of word: String) throws -> String {
-            let match = try #require(
-                source.firstMatch(of: try Regex("\(word)\\) printf '([^']+)'")),
-                "compat_run.sh no longer names \(word)")
-            return String(match[1].substring ?? "")
+        let function = try #require(source.firstMatch(of: /(?s)tool_name\(\) \{.*?\n\}/))
+        func name(of word: String, host: String = "arm64") throws -> String {
+            let result = try Shell.run("/bin/sh", ["-c",
+                "\(function.0)\nnp_host_arch=$1; tool_name \"$2\"", "test", host, word])
+            #expect(result.status == 0)
+            return result.stdout
         }
 
         // The machine word each loader wants, taken from the rule rather than restated.
@@ -378,6 +378,7 @@ struct PrefixToolsTests {
 
         #expect(try name(of: wanted(#"aarch64-unix\) want=(\w+)"#)).contains("FEX"))
         #expect(try name(of: wanted(#"\*\) want=(\w+)"#)).contains("Rosetta"))
+        #expect(try name(of: wanted(#"\*\) want=(\w+)"#), host: "x86_64").contains("native Intel"))
 
         // A prefix that reads as 32 bit is neither build, so it gets no build name.
         let fallback = try #require(source.firstMatch(of: /\*\) printf '([^']+)'/))

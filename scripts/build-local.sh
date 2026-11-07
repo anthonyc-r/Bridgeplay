@@ -57,6 +57,9 @@ export DEVELOPER_DIR
 # A malformed beta stamp (BRIDGEPLAY_BETA*, see stamp-beta.sh) fails now, not after the slow phases.
 sh scripts/stamp-beta.sh check
 
+ARCH=${ARCH:-$(uname -m)}
+case "$ARCH" in arm64|x86_64) ;; *) echo "==> unsupported architecture: $ARCH" >&2; exit 1 ;; esac
+export ARCH
 JOBS=${JOBS:-$(sysctl -n hw.ncpu)}
 LOG_DIR=$repo/build/logs
 mkdir -p "$LOG_DIR"
@@ -72,7 +75,8 @@ for tool in git make cmake curl python3 rsync lipo codesign ditto shasum \
 	need "$tool"
 done
 # setup-wine-tree.sh puts Homebrew's keg-only bison first on PATH, macOS's is too old.
-[ -x /opt/homebrew/opt/bison/bin/bison ] || missing="$missing bison(homebrew)"
+brew_prefix=$(brew --prefix 2>/dev/null || true)
+[ -x "$brew_prefix/opt/bison/bin/bison" ] || missing="$missing bison(homebrew)"
 xcrun --find swift >/dev/null 2>&1 || missing="$missing swift"
 xcrun --find actool >/dev/null 2>&1 || missing="$missing actool"
 if [ -n "$missing" ]; then
@@ -147,13 +151,16 @@ if [ "$(git -C vendor/dobby rev-parse HEAD)" != "$DOBBY_COMMIT" ]; then
 	git -C vendor/dobby checkout -q "$DOBBY_COMMIT"
 fi
 
-dobby_stamp=build/dobby/.notproton-commit
-if [ -f build/dobby/libdobby.a ] && [ "$(cat "$dobby_stamp" 2>/dev/null)" = "$DOBBY_COMMIT" ]; then
-	echo "==> [dobby] build/dobby is current for $DOBBY_COMMIT, skipped"
+dobby_dir=build/dobby
+[ "$ARCH" = arm64 ] || dobby_dir=build/dobby-$ARCH
+dobby_stamp=$dobby_dir/.notproton-commit
+dobby_key="$DOBBY_COMMIT-$(shasum -a 256 vendor/patches/dobby-x86-jcc-rel32.patch | awk '{print $1}')"
+if [ -f "$dobby_dir/libdobby.a" ] && [ "$(cat "$dobby_stamp" 2>/dev/null)" = "$dobby_key" ]; then
+	echo "==> [dobby] $dobby_dir is current for $DOBBY_COMMIT, skipped"
 else
-	rm -rf build/dobby
+	rm -rf "$dobby_dir"
 	phase dobby make dobby
-	echo "$DOBBY_COMMIT" >"$dobby_stamp"
+	echo "$dobby_key" >"$dobby_stamp"
 fi
 
 # --- dylib, shim, helpers ----------------------------------------------------------
@@ -177,7 +184,7 @@ fi
 # Like CI's bridge cache: outputs built from these exact sources are reused, which is how a
 # worktree seeded by worktree-seed.sh skips the Wine clone and build.
 bridge_key=$(sh scripts/bridge-key.sh)
-bridge_stamp=scratch/.bridge-key
+bridge_stamp=scratch/.bridge-key-$ARCH
 bridge_built=0
 if [ "$(cat "$bridge_stamp" 2>/dev/null)" = "$bridge_key" ]; then
 	bridge_built=1
@@ -233,7 +240,7 @@ sha=$(shasum -a 256 "$zip_out" | cut -d' ' -f1)
 # The checks depend on the source, not on the version number, so a tree that already
 # passed (a release right after its bump commit) skips them. Only a clean tree is stamped.
 # BRIDGEPLAY_FORCE_CHECKS=1 runs them anyway.
-checks_stamp=$repo/build/.checks-passed
+checks_stamp=$repo/build/.checks-passed-$ARCH
 source_fingerprint() {
 	git -C "$repo" diff --quiet HEAD -- 2>/dev/null || return 1
 	git -C "$repo" ls-files -s | grep -v '	dylib/version.h$' | shasum | cut -d' ' -f1
@@ -253,6 +260,8 @@ fi
 # counts only when both jobs ran and succeeded (scripts/ci-run-passed.sh).
 ci_slug=${BRIDGEPLAY_CI_REPO:-raymondchins/Bridgeplay}
 ci_passed() {
+	# The upstream workflow runs on Apple Silicon, so its result cannot validate Intel.
+	[ "$ARCH" = arm64 ] || return 1
 	command -v gh >/dev/null 2>&1 || return 1
 	for sha in $(git -C "$repo" rev-list --max-count=5 HEAD); do
 		# Only docs (.github/docs-only-paths) and version.h may differ from that commit.

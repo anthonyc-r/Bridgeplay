@@ -363,6 +363,10 @@ enum WinecxD3DMetal {
         root: URL, roots: [URL] = searchRoots(), stock: [String: String]? = nil
     ) -> Payload? {
         guard let release = FreeEngineWinecx.release(forRoot: root) else { return nil }
+        guard SetupChecks.isAppleSilicon else {
+            unlink(root: root)
+            return nil
+        }
         let stock = stock ?? release.d3dStock
         guard let payload = locate(in: roots) else {
             unlink(root: root)

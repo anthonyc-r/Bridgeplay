@@ -8,7 +8,7 @@ struct InstallPayloadTests {
 
     private func stage(_ root: URL, dylib: Bool = true, shim: Bool = true, iconmaker: Bool = true, appinfo: Bool = true, signatures: [String] = ["1788400362.json"], fonts: [String] = ["arial.ttf"]) throws {
         let files = FileManager.default
-        let signatureDir = root.appending(path: "signatures/macos.arm64")
+        let signatureDir = root.appending(path: SupportPaths.signatureSubpath)
         try files.createDirectory(at: signatureDir, withIntermediateDirectories: true)
         if dylib { try Data("dylib".utf8).write(to: root.appending(path: SupportPaths.dylibName)) }
         if shim { try Data("shim".utf8).write(to: root.appending(path: "overlay-shim.dylib")) }
@@ -45,8 +45,26 @@ struct InstallPayloadTests {
         #expect((size ?? 0) > 100_000, "the staged dylib is too small to be the built one")
 
         let architectures = try Shell.run("/usr/bin/lipo", ["-info", located.dylib.path(percentEncoded: false)])
+        #if arch(arm64)
         #expect(architectures.stdout.contains("arm64"))
+        #endif
         #expect(architectures.stdout.contains("x86_64"))
+        #if arch(x86_64)
+        #expect(InstallPayload.hasIntelComponents(root: try InstallPayload.root()))
+        #endif
+    }
+
+    @Test("The old empty Intel dylib cannot enable native Steam setup")
+    func rejectsIntelStub() throws {
+        let root = try scratchDirectory("intel-stub")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try stage(root)
+        let source = root.appending(path: "stub.c")
+        try Data("void notproton_stub(void) {}\n".utf8).write(to: source)
+        try Shell.check("/usr/bin/clang", ["-dynamiclib", "-arch", "x86_64",
+                        "-o", root.appending(path: SupportPaths.dylibName).path,
+                        source.path])
+        #expect(!InstallPayload.hasIntelComponents(root: root))
     }
 
     @Test("Every signature database in the payload is found, in a stable order")
@@ -86,7 +104,7 @@ struct InstallPayloadTests {
             _ = try InstallPayload.locate(root: root)
             Issue.record("a payload with no signature database was accepted")
         } catch let failure as StepFailure {
-            #expect(failure.detail.contains("signatures/macos.arm64"))
+            #expect(failure.detail.contains(SupportPaths.signatureSubpath))
         }
     }
 
@@ -104,7 +122,7 @@ struct InstallPayloadTests {
             #expect(failure.detail.contains("overlay-shim.dylib"))
             #expect(failure.detail.contains("iconmaker"))
             #expect(failure.detail.contains("appinfo"))
-            #expect(failure.detail.contains("signatures/macos.arm64"))
+            #expect(failure.detail.contains(SupportPaths.signatureSubpath))
             #expect(failure.detail.contains("fonts"))
         }
     }

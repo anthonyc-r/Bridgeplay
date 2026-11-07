@@ -169,14 +169,19 @@ case "$np_build" in *[!A-Za-z0-9.-]*) np_build="" ;; esac
 np_display=$(sed -n 's/.*"display_name"[[:space:]]*"\(.*\)".*/\1/p' \
   "$np_tool_dir/compatibilitytool.vdf" 2>/dev/null | head -1) || np_display=""
 [ -n "$np_display" ] || np_display="CrossOver build ${np_build:-unknown}"
+np_host_arch=$(uname -m)
 CX_ROOT="$np_support/runners/crossover-$np_build/CrossOver"
 export CX_ROOT
+if [ "$np_host_arch" = x86_64 ] && [ -f "$CX_ROOT/lib/notproton-backends/d3dmetal.enabled" ]; then
+  echo "Bridgeplay: this runner has Apple-only D3DMetal linked. Set up WineCX again to restore its Intel-compatible graphics." >&2
+  exit 1
+fi
 # CrossOver initializes Rosetta's Windows thread-state support even without D3DMetal.
-if [ -f "$CX_ROOT/lib64/apple_gptk/external/libd3dshared.dylib" ]; then
+if [ "$np_host_arch" != x86_64 ] && [ -f "$CX_ROOT/lib64/apple_gptk/external/libd3dshared.dylib" ]; then
   export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CX_ROOT/lib64/apple_gptk/external/libd3dshared.dylib"
 fi
 # WineCX with a Game Porting Toolkit linked in keeps libd3dshared in its own lib/external.
-if [ -z "${CX_APPLEGPTK_LIBD3DSHARED_PATH:-}" ] \
+if [ "$np_host_arch" != x86_64 ] && [ -z "${CX_APPLEGPTK_LIBD3DSHARED_PATH:-}" ] \
   && [ -f "$CX_ROOT/lib/notproton-backends/d3dmetal.enabled" ] \
   && [ -f "$CX_ROOT/lib/external/libd3dshared.dylib" ]; then
   export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CX_ROOT/lib/external/libd3dshared.dylib"
@@ -185,7 +190,8 @@ fi
 wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
 WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
 WINESERVER="$CX_ROOT/bin/wineserver-arm64"
-if [ "$np_flavor" = rosetta ] || [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
+if [ "$np_host_arch" = x86_64 ] || [ "$np_flavor" = rosetta ] \
+  || [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
   wine_unix="$CX_ROOT/lib/wine/x86_64-unix"
   WINELOADER="$wine_unix/wine"
   WINESERVER="$CX_ROOT/bin/wineserver"
@@ -194,7 +200,7 @@ fi
 export WINELOADER WINESERVER
 
 np_dropped=""
-if [ "${wine_unix##*/}" = aarch64-unix ]; then
+if [ "$np_host_arch" = x86_64 ] || [ "${wine_unix##*/}" = aarch64-unix ]; then
   if [ "${CX_GRAPHICS_BACKEND:-}" = d3dmetal ]; then
     unset -v CX_GRAPHICS_BACKEND
     np_dropped="CX_GRAPHICS_BACKEND=d3dmetal"
@@ -203,9 +209,16 @@ if [ "${wine_unix##*/}" = aarch64-unix ]; then
     unset -v "$name"
     np_dropped="$np_dropped${np_dropped:+ }$name"
   done
-  fex_from=environment
-  [ -n "${FEX_X87REDUCEDPRECISION+x}" ] || fex_from=default
-  export FEX_X87REDUCEDPRECISION="${FEX_X87REDUCEDPRECISION-1}"
+  if [ "$np_host_arch" = x86_64 ]; then
+    for name in $(env | LC_ALL=C sed -nE 's/^(CX_APPLEGPTK_LIBD3DSHARED_PATH|FEX_[A-Z0-9_]+)=.*/\1/p' | LC_ALL=C sort); do
+      unset -v "$name"
+      np_dropped="$np_dropped${np_dropped:+ }$name"
+    done
+  else
+    fex_from=environment
+    [ -n "${FEX_X87REDUCEDPRECISION+x}" ] || fex_from=default
+    export FEX_X87REDUCEDPRECISION="${FEX_X87REDUCEDPRECISION-1}"
+  fi
 else
   avx_from=environment
   [ -n "$ROSETTA_ADVERTISE_AVX" ] || avx_from=default
@@ -239,7 +252,7 @@ fi
   echo "-- steam env passed through --"
   # Players attach this log to public issues, so the login name and video token stay out.
   env | grep -iE '^(Steam|SDL_)' | grep -ivE '^(SteamUser|SteamAppUser|STEAMVIDEOTOKEN)=' | sort
-  [ -z "$np_dropped" ] || echo "ignored on arm64 Wine: $np_dropped"
+  [ -z "$np_dropped" ] || echo "ignored for $np_host_arch/${wine_unix##*/}: $np_dropped"
 } >> "$log" 2>&1 || true
 
 # Wine keeps its server socket in <tmp>/.wine-<uid> and the wineserver refuses to start when
@@ -480,6 +493,13 @@ gamefix_read() {
 }
 
 gamefix_apply_env() {
+  if [ "${np_host_arch:-}" = x86_64 ]; then
+    case "$1" in
+      D3DM_*|ROSETTA_ADVERTISE_AVX|FEX_*|CX_APPLEGPTK_LIBD3DSHARED_PATH)
+        gamefix_log "$1 ignored on Intel, the $3 conf value is not applied"
+        return 0 ;;
+    esac
+  fi
   eval "launch_set=\${$1+x}"
   if [ -n "$launch_set" ]; then
     gamefix_log "$1 kept from the launch options, the $3 conf value is not applied"
@@ -1153,7 +1173,8 @@ prefix_machine() {
 tool_name() {
   case "$1" in
     aa64) printf 'FEX' ;;
-    8664) printf 'Rosetta' ;;
+    8664)
+      if [ "$np_host_arch" = x86_64 ]; then printf 'native Intel Wine'; else printf 'Rosetta'; fi ;;
     *) printf '32-bit' ;;
   esac
 }
@@ -2679,8 +2700,10 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   echo "sync: WINEMSYNC=$WINEMSYNC from $msync_from" >> "$log" 2>&1 || true
   if [ "${wine_unix##*/}" = aarch64-unix ]; then
     echo "fex: FEX_X87REDUCEDPRECISION=$FEX_X87REDUCEDPRECISION from $fex_from" >> "$log" 2>&1 || true
-  else
+  elif [ "$np_host_arch" != x86_64 ]; then
     echo "avx: ROSETTA_ADVERTISE_AVX=$ROSETTA_ADVERTISE_AVX from $avx_from" >> "$log" 2>&1 || true
+  else
+    echo "runtime: native x86_64" >> "$log" 2>&1 || true
   fi
   without_lock_fds "$WINESERVER" -k >> "$log" 2>&1 || true
   if [ "$prefix_was_new" = 1 ]; then launch_progress setup; else launch_progress prepare; fi

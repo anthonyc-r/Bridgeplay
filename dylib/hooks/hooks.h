@@ -13,6 +13,10 @@ typedef enum {
 
 // Register state a prehook is handed, in Dobby's layout.
 typedef struct { uint64_t _d0, sp, _d1; struct { uint64_t x[29]; } general; } np_arm64_ctx_t;
+typedef struct {
+    struct { uint64_t rax, rbx, rcx, rdx, rbp, rsp, rdi, rsi, r8, r9, r10, r11, r12, r13, r14, r15; } general;
+    uint64_t dummy, flags, ret;
+} np_x86_ctx_t;
 
 typedef struct {
     const char      *label;

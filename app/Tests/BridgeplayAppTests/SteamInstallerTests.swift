@@ -23,7 +23,7 @@ struct SteamInstallerTests {
     // having been run. The dylib has to be a real Mach-O because it gets signed.
     private func payload(in work: URL) throws -> InstallPayload.Located {
         let root = work.appending(path: "payload")
-        let signatureDir = root.appending(path: "signatures/macos.arm64")
+        let signatureDir = root.appending(path: SupportPaths.signatureSubpath)
         try FileManager.default.createDirectory(at: signatureDir, withIntermediateDirectories: true)
 
         let source = work.appending(path: "probe.c")
@@ -31,7 +31,7 @@ struct SteamInstallerTests {
 
         let dylib = root.appending(path: SupportPaths.dylibName)
         try Shell.check("/usr/bin/clang", [
-            "-dynamiclib", "-o", dylib.path(percentEncoded: false), source.path(percentEncoded: false),
+            "-dynamiclib", "-Wl,-adhoc_codesign", "-o", dylib.path(percentEncoded: false), source.path(percentEncoded: false),
         ])
 
         let shim = root.appending(path: "overlay-shim.dylib")
@@ -63,7 +63,7 @@ struct SteamInstallerTests {
 
         var plist: URL { app.appending(path: "Contents/Info.plist") }
         var deployedDylib: URL { app.appending(path: "Contents/MacOS/\(SupportPaths.dylibName)") }
-        var signatures: URL { support.appending(path: "signatures/macos.arm64") }
+        var signatures: URL { support.appending(path: SupportPaths.signatureSubpath) }
         var fonts: URL { support.appending(path: "fonts") }
         var overlayShim: URL { support.appending(path: "overlay-shim.dylib") }
         var iconmaker: URL { support.appending(path: "iconmaker") }

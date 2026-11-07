@@ -12,8 +12,10 @@ scratch/wine-build-dual/programs/steam.exe/x86_64-windows/steam.exe
 scratch/wine-build-dual/dlls/lsteamclient/x86_64-windows/lsteamclient.dll
 scratch/wine-build-dual/dlls/lsteamclient/lsteamclient.so
 scratch/wine-build-dual/dlls/lsteamclient/i386-windows/lsteamclient.dll
-scratch/wine-build-arm64/dlls/lsteamclient/lsteamclient.so
 EOF
+	if [ "${ARCH:-$(uname -m)}" = arm64 ]; then
+		echo scratch/wine-build-arm64/dlls/lsteamclient/lsteamclient.so
+	fi
 	exit 0
 fi
 

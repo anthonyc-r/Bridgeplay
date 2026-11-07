@@ -108,7 +108,10 @@ struct RunnerPrepareTests {
         #expect(toolList(runners) == CompatToolList.contents(
             SupportedRunners.tools(for: [Self.release, Self.fex])
         ))
-        #expect(toolList(runners)?.hasPrefix("bridgeplay-proton-fex\t27.0.0.40921-fex\tfex\t") == true)
+        let firstTool = CompatTool.Flavor.fexAvailable
+            ? "bridgeplay-proton-fex\t27.0.0.40921-fex\tfex\t"
+            : "bridgeplay-proton-fex-rosetta\t27.0.0.40921-fex\trosetta\t"
+        #expect(toolList(runners)?.hasPrefix(firstTool) == true)
 
         let again = try prepare(Self.release, runners: runners, calls: calls)
         #expect(!again.toolsChanged)
@@ -266,7 +269,7 @@ struct RunnerPrepareTests {
     private func sync(_ runners: URL) throws {
         try CompatToolList.sync(
             runners: runners, bridge: runners.appending(path: "bridge"), file: runners.appending(path: "tools"),
-            compatTools: runners.appending(path: "compatibilitytools.d")
+            compatTools: runners.appending(path: "compatibilitytools.d"), fexAvailable: true
         )
     }
 

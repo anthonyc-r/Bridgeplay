@@ -1,5 +1,8 @@
 CC       := clang
-ARCH     := arm64
+ARCH     ?= $(shell uname -m)
+ifneq ($(filter $(ARCH),arm64 x86_64),$(ARCH))
+$(error Unsupported macOS architecture: $(ARCH))
+endif
 MIN_VER  := 15.0
 # The oldest macOS the product supports. mincheck holds every binary in the bundle
 # to it, MIN_VER above is only what the dylib and helpers are compiled for.
@@ -27,7 +30,7 @@ LDFLAGS  := -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) \
 
 FRAMEWORKS := -framework CoreFoundation -framework CoreGraphics
 
-DOBBY_DIR  := build/dobby
+DOBBY_DIR  := $(if $(filter arm64,$(ARCH)),build/dobby,build/dobby-$(ARCH))
 DOBBY_LIBS := $(DOBBY_DIR)/libdobby.a \
               $(DOBBY_DIR)/builtin-plugin/SymbolResolver/libdobby_symbol_resolver.a \
               $(DOBBY_DIR)/builtin-plugin/SymbolResolver/libmacho_ctx_kit.a \
@@ -45,6 +48,8 @@ SRCS := \
 	dylib/util/log.c \
 	dylib/util/file.c \
 	dylib/util/peicon.c \
+	dylib/util/x86.c \
+	vendor/hde64/hde64.c \
 	dylib/hooks/hooks.c \
 	dylib/hooks/hook_compat.c \
 	dylib/hooks/hook_shortcut.c \
@@ -72,12 +77,16 @@ TEST_CC     := $(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g \
 GENERATED_DIR := $(OUT_DIR)/generated
 RUN_SCRIPT_H  := $(GENERATED_DIR)/compat_run.h
 CFLAGS += -I$(GENERATED_DIR)
+ifeq ($(ARCH),x86_64)
+CFLAGS += -Ivendor/dobby/source
+endif
 
-ARM64_DYLIB := $(OUT_DIR)/notproton.arm64.dylib
-X86_STUB    := $(OUT_DIR)/notproton.x86_64.dylib
+NATIVE_DYLIB := $(OUT_DIR)/notproton.$(ARCH).dylib
+X86_STUB    := $(OUT_DIR)/notproton.x86_64-stub.dylib
 TARGET      := $(OUT_DIR)/notproton.dylib
 
-OBJS := $(patsubst %.c,$(OUT_DIR)/%.o,$(SRCS))
+OBJ_DIR := $(OUT_DIR)/objects/$(ARCH)
+OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
 .PHONY: all clean rebuild dobby deploy dylib dylib-install sigcheck fonts fonts-install app-payload app app-zip \
@@ -215,10 +224,10 @@ mincheck:
 .PHONY: l10ncheck
 l10ncheck:
 	@bin=$$(cd app/.build/release 2>/dev/null && pwd -P) || \
-		bin=$$(swift build --package-path app -c release --show-bin-path); \
+		bin=$$(swift build --package-path app -c release --arch $(ARCH) --show-bin-path); \
 	for target in BridgeplayApp BridgeplayInstaller; do \
 		python3 dylib/tests/l10ncheck.py "app/Sources/$$target/Resources/Localization/Localizable.xcstrings" \
-			"$$bin/../../Intermediates.noindex/BridgeplayApp.build/$$(basename "$$bin")" zh-Hans it ru || exit $$?; \
+			"$$bin/../../" zh-Hans it ru || exit $$?; \
 	done
 
 # runcheck owns compat_run.sh, whose warnings wait for a change that can move
@@ -240,7 +249,7 @@ COMPATCHECK := $(OUT_DIR)/compatcheck
 compatcheck: $(RUN_SCRIPT_H)
 	@if [ ! -f dylib/tests/compatcheck.c ]; then $(call SKIP,compatcheck,dylib/tests/compatcheck.c); exit 0; fi; \
 	mkdir -p $(OUT_DIR) && \
-	$(TEST_CC) -I$(GENERATED_DIR) \
+	$(TEST_CC) -DNP_TEST_ARM64 -I$(GENERATED_DIR) \
 	  -o $(COMPATCHECK) dylib/tests/compatcheck.c && \
 	$(COMPATCHECK)
 
@@ -268,7 +277,7 @@ shortcutcheck: $(OUT_DIR)/iconmaker
 	mkdir -p $(OUT_DIR) && \
 	$(TEST_CC) -o $(SHORTCUT_BUNDLE_CHECK) dylib/tests/shortcut-bundle-check.c && \
 	$(SHORTCUT_BUNDLE_CHECK) && \
-	$(TEST_CC) -o $(SHORTCUTCHECK) dylib/tests/shortcutcheck.c && \
+	$(TEST_CC) -DNP_TEST_ARM64 -o $(SHORTCUTCHECK) dylib/tests/shortcutcheck.c && \
 	$(SHORTCUTCHECK) && \
 	python3 dylib/tests/shortcut-launch.py $(OUT_DIR)/iconmaker
 
@@ -299,7 +308,7 @@ $(CALLSCHECK): $(CALLSCHECK_SRCS)
 	@mkdir -p $(dir $@)
 	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
 	  -Wall -Wextra -Wno-unused-parameter -Idylib -Ivendor \
-	  -fsanitize=address,undefined -fno-sanitize-recover=all \
+	  -DNP_TEST_ARM64 -fsanitize=address,undefined -fno-sanitize-recover=all \
 	  -o $@ $(CALLSCHECK_SRCS)
 
 callscheck:
@@ -307,6 +316,15 @@ callscheck:
 	$(MAKE) -s $(CALLSCHECK) && $(CALLSCHECK)
 
 SIGDB_FIXTURES := dylib/tests/sigdb-fixtures
+
+ifeq ($(ARCH),x86_64)
+sigdb-fixtures:
+	@mkdir -p $(OUT_DIR)
+	$(TEST_CC) -Ivendor -o $(OUT_DIR)/intel-sigdb-fixtures dylib/tests/intel-sigdb-fixtures.c \
+		dylib/core/macho.c dylib/resolver/aob.c dylib/resolver/anchor.c \
+		dylib/resolver/resolver.c dylib/resolver/sigdb.c dylib/util/log.c dylib/util/file.c vendor/cJSON.c
+	$(OUT_DIR)/intel-sigdb-fixtures
+else
 
 sigdb-fixtures:
 	@if [ ! -d $(SIGDB_FIXTURES) ] || [ ! -f dylib/tests/anchorcheck.c ]; then \
@@ -334,6 +352,8 @@ sigdb-fixtures:
 	done; \
 	if [ $$fail -ne 0 ]; then exit 1; fi; \
 	echo "==> $$n sigdb fixtures: none crashed, each exited as $(SIGDB_FIXTURES)/EXPECTED records"
+
+endif
 
 PEICON_CHECK := $(OUT_DIR)/peicon-check
 
@@ -458,7 +478,8 @@ APP_TESTS := app/Tests
 # Build the tests, then link Sparkle where the rpath expects it. Build products only.
 app-tests:
 	@if [ ! -d $(APP_TESTS) ]; then $(call SKIP,app-tests,$(APP_TESTS)); exit 0; fi; \
-	touch app/Package.swift; cd app && swift build --build-tests && \
+	touch app/Package.swift; swift build --package-path app --build-tests && \
+	sh scripts/prepare-swift-resources.sh debug $(ARCH) && cd app && \
 	bin=$$(swift build --show-bin-path) && \
 	if [ -d "$$bin/PackageFrameworks" ] && [ -d "$$bin/Sparkle.framework" ] && \
 		[ ! -e "$$bin/PackageFrameworks/Sparkle.framework" ]; then \
@@ -503,7 +524,7 @@ ntdll-resolve:
 		echo "==> ntdll-resolve: $(CX_ROOT) not present, skipped (set CX_ROOT)"; exit 0; fi; \
 	python3 ntdll-patch/resolve.py "$(CX_ROOT)"
 
-$(ARM64_DYLIB): $(OBJS) $(DOBBY_LIBS)
+$(NATIVE_DYLIB): $(OBJS) $(DOBBY_LIBS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) -o $@ $^ $(FRAMEWORKS) -lc++
 
@@ -513,12 +534,18 @@ $(X86_STUB): dylib/stub_x86_64.c
 		-dynamiclib -install_name @rpath/notproton.dylib \
 		-o $@ $<
 
-$(TARGET): $(ARM64_DYLIB) $(X86_STUB)
-	lipo -create $^ -output $@
+ifeq ($(ARCH),arm64)
+DYLIB_SLICES := $(NATIVE_DYLIB) $(X86_STUB)
+else
+DYLIB_SLICES := $(NATIVE_DYLIB)
+endif
+
+$(TARGET): $(DYLIB_SLICES) FORCE
+	lipo -create $(DYLIB_SLICES) -output $@
 	codesign -fs - $@
 	@echo "==> Built: $@"
 
-$(OUT_DIR)/%.o: %.c
+$(OBJ_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -526,7 +553,7 @@ $(RUN_SCRIPT_H): dylib/feats/compat_run.sh dylib/embed_script.py
 	@mkdir -p $(GENERATED_DIR)
 	python3 dylib/embed_script.py $< $@ RUN_SCRIPT
 
-$(OUT_DIR)/dylib/feats/compat.o: $(RUN_SCRIPT_H)
+$(OBJ_DIR)/dylib/feats/compat.o: $(RUN_SCRIPT_H)
 
 SUPPORT_DIR        := $(HOME)/Library/Application Support/bridgeplay
 OVERLAY_SHIM_SRC   := overlay-shim/overlay_shim.m
@@ -623,10 +650,17 @@ helpers-install: $(ICONMAKER) $(APPINFO)
 	$(call install_atomically,$(APPINFO),$(SUPPORT_DIR)/appinfo)
 	@echo "==> Installed: $(SUPPORT_DIR)/{iconmaker,appinfo}"
 
-dobby:
+.PHONY: prepare-dobby
+prepare-dobby:
+	@if ! git -C vendor/dobby apply --reverse --check ../patches/dobby-x86-jcc-rel32.patch >/dev/null 2>&1; then \
+		git -C vendor/dobby apply --check ../patches/dobby-x86-jcc-rel32.patch && \
+		git -C vendor/dobby apply ../patches/dobby-x86-jcc-rel32.patch; \
+	fi
+
+dobby: prepare-dobby
 	@mkdir -p $(DOBBY_DIR)
 	cd $(DOBBY_DIR) && cmake $(CURDIR)/vendor/dobby \
-		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_OSX_ARCHITECTURES=$(ARCH) \
 		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MIN_VER) \
 		-DDOBBY_DEBUG=OFF \
 		-DDOBBY_GENERATE_SHARED=OFF \
@@ -642,9 +676,9 @@ dylib-install: $(TARGET)
 	@echo "==> Installed: $(INSTALL_DST)"
 
 sigdb-install:
-	@mkdir -p "$(SUPPORT_DIR)/signatures/macos.arm64"
-	cp -f signatures/macos.arm64/*.json "$(SUPPORT_DIR)/signatures/macos.arm64/"
-	@echo "==> Installed: $(SUPPORT_DIR)/signatures/macos.arm64"
+	@mkdir -p "$(SUPPORT_DIR)/signatures/macos.$(ARCH)"
+	cp -f signatures/macos.$(ARCH)/*.json "$(SUPPORT_DIR)/signatures/macos.$(ARCH)/"
+	@echo "==> Installed: $(SUPPORT_DIR)/signatures/macos.$(ARCH)"
 
 LAUNCHABLE_BUNDLES := $(HOME)/Desktop/Bridgeplay.app /Applications/Bridgeplay.app
 
@@ -684,15 +718,22 @@ BRIDGE_FILES := \
 	$(WINE_BUILD)/programs/steam.exe/x86_64-windows/steam.exe:steam.exe \
 	$(WINE_BUILD)/dlls/lsteamclient/x86_64-windows/lsteamclient.dll:x86_64-windows-lsteamclient.dll \
 	$(WINE_BUILD)/dlls/lsteamclient/lsteamclient.so:x86_64-unix-lsteamclient.so \
-	$(WINE_BUILD_ARM64)/dlls/lsteamclient/lsteamclient.so:aarch64-unix-lsteamclient.so \
 	$(WINE_BUILD)/dlls/lsteamclient/i386-windows/lsteamclient.dll:i386-windows-lsteamclient.dll
+
+ifeq ($(ARCH),arm64)
+BRIDGE_FILES += $(WINE_BUILD_ARM64)/dlls/lsteamclient/lsteamclient.so:aarch64-unix-lsteamclient.so
+endif
 
 bridge:
 	bridge/setup-wine-tree.sh
+ifeq ($(ARCH),arm64)
 	WINE_BUILD="$(CURDIR)/$(WINE_BUILD_ARM64)" HOST=aarch64-apple-darwin \
 		HOST_CC="clang -arch arm64" HOST_CXX="clang++ -arch arm64" bridge/setup-wine-tree.sh
+endif
 	lsteamclient/build.sh
+ifeq ($(ARCH),arm64)
 	UNIX_ARCH=arm64 WINE_BUILD="$(CURDIR)/$(WINE_BUILD_ARM64)" lsteamclient/build.sh --unix
+endif
 	steam-shim/build.sh
 	@echo "==> Built the bridge, now run: $(MAKE) app-payload"
 
@@ -702,8 +743,11 @@ fonts:
 app-payload: $(TARGET) $(OVERLAY_SHIM) $(ICONMAKER) $(APPINFO)
 	@# A signature file deleted from the repo must not ship from the last payload.
 	@test -n "$(APP_PAYLOAD)" && rm -rf "$(APP_PAYLOAD)/signatures"
-	@mkdir -p "$(APP_PAYLOAD)/signatures/macos.arm64"
+	@mkdir -p "$(APP_PAYLOAD)/signatures/macos.$(ARCH)"
 	@mkdir -p "$(APP_PAYLOAD)/bridge"
+ifeq ($(ARCH),x86_64)
+	@rm -f "$(APP_PAYLOAD)/bridge/aarch64-unix-lsteamclient.so"
+endif
 	@# Staged by 0.7.51 and earlier; left behind they fail the PAYLOAD_SIGN_IDS check.
 	@rm -rf "$(APP_PAYLOAD)/controllers" "$(APP_PAYLOAD)/game-host.dylib" "$(APP_PAYLOAD)/prepare-game-loader"
 	cp -f $(TARGET) "$(APP_PAYLOAD)/notproton.dylib"
@@ -711,7 +755,7 @@ app-payload: $(TARGET) $(OVERLAY_SHIM) $(ICONMAKER) $(APPINFO)
 	cp -f $(ICONMAKER) "$(APP_PAYLOAD)/iconmaker"
 	cp -f $(APPINFO) "$(APP_PAYLOAD)/appinfo"
 	cp -f dylib/feats/compat_run.sh "$(APP_PAYLOAD)/run"
-	cp -f signatures/macos.arm64/*.json "$(APP_PAYLOAD)/signatures/macos.arm64/"
+	cp -f signatures/macos.$(ARCH)/*.json "$(APP_PAYLOAD)/signatures/macos.$(ARCH)/"
 	@rm -rf "$(APP_PAYLOAD)/gamefixes" && mkdir -p "$(APP_PAYLOAD)/gamefixes"
 	@if ls gamefixes/*.conf >/dev/null 2>&1; then cp -f gamefixes/*.conf "$(APP_PAYLOAD)/gamefixes/"; fi
 	cp -f installer/config/gamecontrollerdb.txt "$(APP_PAYLOAD)/gamecontrollerdb.txt"
@@ -730,7 +774,8 @@ app-payload: $(TARGET) $(OVERLAY_SHIM) $(ICONMAKER) $(APPINFO)
 	@echo "==> Staged app payload in $(APP_PAYLOAD)"
 
 APP_BUNDLE  := $(OUT_DIR)/Bridgeplay.app
-APP_BUNDLE_PAYLOAD := $(APP_BUNDLE)/Contents/Resources/BridgeplayApp_BridgeplayApp.bundle/Contents/Resources/payload
+APP_BUNDLE_RESOURCE_ROOT := $(APP_BUNDLE)/Contents/Resources/BridgeplayApp_BridgeplayApp.bundle/Contents/Resources
+APP_BUNDLE_PAYLOAD = $(APP_BUNDLE_RESOURCE_ROOT)/payload
 APP_ZIP     := $(OUT_DIR)/Bridgeplay.zip
 # dylib/version.h: Bridgeplay semver for CFBundleShortVersionString, the release counter
 # for CFBundleVersion (Sparkle orders updates by it; 32 is newer than the old 1.1.9.31),
@@ -756,8 +801,10 @@ PAYLOAD_SIGN_IDS := \
 	overlay-shim.dylib:com.bridgeplay.overlay-shim \
 	iconmaker:com.bridgeplay.iconmaker \
 	appinfo:com.bridgeplay.appinfo \
-	bridge/x86_64-unix-lsteamclient.so:com.bridgeplay.lsteamclient \
-	bridge/aarch64-unix-lsteamclient.so:com.bridgeplay.lsteamclient
+	bridge/x86_64-unix-lsteamclient.so:com.bridgeplay.lsteamclient
+ifeq ($(ARCH),arm64)
+PAYLOAD_SIGN_IDS += bridge/aarch64-unix-lsteamclient.so:com.bridgeplay.lsteamclient
+endif
 
 # The icon name must match CFBundleIconFile/CFBundleIconName in app/Info.plist.
 ICON_NAME := Bridgeplay
@@ -787,13 +834,8 @@ $(ICONGEN): helpers/icon/icongen.swift
 	swiftc -O -o $@ $<
 	@echo "==> Built $@"
 
-$(ICON_CAR): $(ICONGEN) $(ICON_MARK)
-	rm -rf "$(ICON_DOC)" "$(ICON_DIR)"
-	$(ICONGEN) "$(ICON_MARK)" "$(ICON_DOC)"
-	@mkdir -p "$(ICON_DIR)"
-	xcrun actool "$(ICON_DOC)" --compile "$(ICON_DIR)" --platform macosx \
-		--minimum-deployment-target 15.0 --app-icon $(ICON_NAME) \
-		--output-partial-info-plist "$(ICON_DIR)/partial.plist" >/dev/null
+$(ICON_CAR): $(ICONGEN) $(ICON_MARK) scripts/build-app-icon.sh
+	sh scripts/build-app-icon.sh "$(ICONGEN)" "$(ICON_MARK)" "$(ICON_DOC)" "$(ICON_DIR)" "$(ICON_NAME)"
 	@test -s "$(ICON_DIR)/$(ICON_NAME).icns" || { echo "actool wrote no $(ICON_NAME).icns" >&2; exit 1; }
 	@echo "==> Built $@"
 
@@ -802,7 +844,11 @@ stamp-check:
 	@sh scripts/stamp-beta.sh check
 
 app: stamp-check app-payload $(ICON_CAR)
-	swift build --package-path app -c release
+	@touch app/Package.swift
+	@mkdir -p app/.build/localized-strings
+	swift build --package-path app -c release --arch $(ARCH) -Xswiftc -emit-localized-strings \
+		-Xswiftc -emit-localized-strings-path -Xswiftc "$(CURDIR)/app/.build/localized-strings"
+	sh scripts/prepare-swift-resources.sh release $(ARCH)
 	rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS" "$(APP_BUNDLE)/Contents/Resources"
 	@if [ -z "$(APP_VERSION)" ] || [ -z "$(APP_BUILD)" ] || [ -z "$(APP_UPSTREAM)" ]; then \
@@ -814,25 +860,28 @@ app: stamp-check app-payload $(ICON_CAR)
 		"Set :NotProtonVersion $(APP_UPSTREAM)" \
 		"$(APP_BUNDLE)/Contents/Info.plist"
 	@sh scripts/stamp-beta.sh apply "$(APP_BUNDLE)/Contents/Info.plist"
-	cp "$$(swift build --package-path app -c release --show-bin-path)/BridgeplayApp" \
+	cp "$$(swift build --package-path app -c release --arch $(ARCH) --show-bin-path)/BridgeplayApp" \
 		"$(APP_BUNDLE)/Contents/MacOS/BridgeplayApp"
 	@mkdir -p "$(APP_BUNDLE)/Contents/Frameworks"
-	ditto "$$(swift build --package-path app -c release --show-bin-path)/Sparkle.framework" \
+	ditto "$$(swift build --package-path app -c release --arch $(ARCH) --show-bin-path)/Sparkle.framework" \
 		"$(APP_BUNDLE)/Contents/Frameworks/Sparkle.framework"
 	install_name_tool -add_rpath @executable_path/../Frameworks \
 		"$(APP_BUNDLE)/Contents/MacOS/BridgeplayApp"
 	xcrun vtool -set-build-version macos $(MIN_VER) "$$(xcrun --sdk macosx --show-sdk-version)" \
 		-replace -output "$(APP_BUNDLE)/Contents/MacOS/BridgeplayApp" \
 		"$(APP_BUNDLE)/Contents/MacOS/BridgeplayApp"
-	cp -R "$$(swift build --package-path app -c release --show-bin-path)/BridgeplayApp_BridgeplayApp.bundle" \
-		"$(APP_BUNDLE)/Contents/Resources/"
-	cp -R "$$(swift build --package-path app -c release --show-bin-path)/BridgeplayApp_BridgeplayUI.bundle" \
-		"$(APP_BUNDLE)/Contents/Resources/"
-	cp -R "$(APP_BUNDLE)/Contents/Resources/BridgeplayApp_BridgeplayApp.bundle/Contents/Resources/"*.lproj \
+	sh scripts/stage-swift-resource-bundle.sh \
+		"$$(swift build --package-path app -c release --arch $(ARCH) --show-bin-path)/BridgeplayApp_BridgeplayApp.bundle" \
+		"$(APP_BUNDLE)/Contents/Resources/BridgeplayApp_BridgeplayApp.bundle"
+	sh scripts/stage-swift-resource-bundle.sh \
+		"$$(swift build --package-path app -c release --arch $(ARCH) --show-bin-path)/BridgeplayApp_BridgeplayUI.bundle" \
+		"$(APP_BUNDLE)/Contents/Resources/BridgeplayApp_BridgeplayUI.bundle"
+	cp -R "$(APP_BUNDLE_RESOURCE_ROOT)/"*.lproj \
 		"$(APP_BUNDLE)/Contents/Resources/"
 	cp "$(ICON_DIR)/Assets.car" "$(ICON_DIR)/$(ICON_NAME).icns" \
 		"$(APP_BUNDLE)/Contents/Resources/"
 	cp $(APP_LICENSES) "$(APP_BUNDLE)/Contents/Resources/"
+	cp vendor/hde64/LICENSE.txt "$(APP_BUNDLE)/Contents/Resources/LICENSE.hde64"
 	@missing=$$(cd "$(APP_PAYLOAD)" && find . -type f ! -name '.DS_Store' | sed 's|^\./||' \
 		| while read -r rel; do \
 			[ -s "$(CURDIR)/$(APP_BUNDLE_PAYLOAD)/$$rel" ] || echo "$$rel"; \
@@ -934,6 +983,10 @@ CI_CHECKS := mincheck l10ncheck \
 	seedcheck gamefixescheck versioncheck cicheck padcheck mappingscheck detourcheck compat-reported-check np-inventory-check np-native-tests native-shim-tests \
 	app-tests native-installercheck
 
+ifeq ($(ARCH),x86_64)
+CI_CHECKS += intel-shortcuts-check intel-dobby-check sigdb-fixtures
+endif
+
 # app.yml runs the checks that need the built app in its build job and the rest in a
 # parallel job; both lists together are CI_CHECKS.
 CI_CHECKS_BUILT := mincheck l10ncheck app-tests
@@ -985,3 +1038,23 @@ native-installer:
 native-installercheck:
 	sh scripts/test-native-installer.sh
 	sh scripts/test-installer-cleanup.sh
+
+.PHONY: intel-shortcuts-check
+intel-shortcuts-check: $(DOBBY_DIR)/libdobby.a
+	$(TEST_CC) -Ivendor/dobby/include -Ivendor/dobby/source \
+		-o $(OUT_DIR)/intel-shortcuts-check dylib/tests/intel-shortcuts-check.c \
+		dylib/core/macho.c dylib/resolver/anchor.c dylib/util/x86.c vendor/hde64/hde64.c
+	$(OUT_DIR)/intel-shortcuts-check
+
+.PHONY: intel-runtimecheck
+intel-runtimecheck: $(TARGET)
+	$(TEST_CC) -Ivendor -Ivendor/dobby/include -Ivendor/dobby/source \
+		-o $(OUT_DIR)/intel-runtimecheck dylib/tests/intel-runtimecheck.c $(TARGET) \
+		-Wl,-rpath,$(CURDIR)/$(OUT_DIR)
+	$(OUT_DIR)/intel-runtimecheck $(firstword $(sort $(wildcard signatures/macos.x86_64/*.json)))
+
+.PHONY: intel-dobby-check
+intel-dobby-check: $(DOBBY_DIR)/libdobby.a
+	$(TEST_CC) -O1 -Ivendor/dobby/include -o $(OUT_DIR)/intel-dobby-check \
+		dylib/tests/intel-dobby-check.c $(DOBBY_DIR)/libdobby.a -lc++
+	$(OUT_DIR)/intel-dobby-check

@@ -207,7 +207,7 @@ enum FreeEngine {
 
     // Puts the bundled winemac-<build>.so, checked against its pin, over the engine's own.
     static func installMacDriver(root: URL, build: String, sha256: String, step: String) throws {
-        guard let source = Bundle.module.url(forResource: "winemac-\(build)", withExtension: "so"),
+        guard let source = AppResources.bundle.url(forResource: "winemac-\(build)", withExtension: "so"),
               SignedPin.matches(source, sha256: sha256)
         else {
             throw StepFailure(step: step, detail: "Bridgeplay is missing its winemac.so for \(build).")

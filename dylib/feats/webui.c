@@ -4,9 +4,14 @@
 #include "../core/macho.h"
 #include "../util/log.h"
 #include "../util/ptr.h"
+#include "../util/arch.h"
+#if NP_INTEL
+#include "../util/x86.h"
+#endif
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 static inline int32_t sign_extend(uint32_t val, int bits) {
     if (val & (1u << (bits - 1))) val -= (1u << bits);
@@ -49,11 +54,11 @@ static inline int32_t sign_extend(uint32_t val, int bits) {
 
 typedef uintptr_t (*np_registry_accessor_fn)(void);
 typedef uintptr_t (*np_msg_new_fn)(void);
-typedef int (*np_notify_fn)(uintptr_t transport, const char *name, uintptr_t message);
+typedef bool (*np_notify_fn)(uintptr_t transport, const char *name, uintptr_t message);
 typedef int (*np_parse_fn)(uintptr_t message, const void *bytes, uint32_t len);
 typedef uintptr_t (*np_job_factory_fn)(uintptr_t dispatcher, uintptr_t arg);
 typedef void      (*np_send_response_fn)(uintptr_t job, uintptr_t ctx);
-typedef int       (*np_register_fn)(uintptr_t registry, void *record);
+typedef bool      (*np_register_fn)(uintptr_t registry, void *record);
 
 // Routes can share request types, so each gets its own job vtable and the job's
 // vptr says which route it belongs to.
@@ -63,6 +68,8 @@ typedef struct {
     uintptr_t           vtable[2 + VT_SLOTS];
 } np_route_t;
 
+static const struct mach_header_64 *g_image;
+static intptr_t g_slide;
 static uintptr_t g_registry;
 static uintptr_t g_register_fn;
 static uintptr_t g_send_response;
@@ -91,7 +98,7 @@ static int bl_target(uint32_t insn, uintptr_t pc, uintptr_t *out) {
 }
 
 static int in_text(uintptr_t va) {
-    return g_text_base && va >= g_text_base && va < g_text_end && (va & 3) == 0;
+    return g_text_base && va >= g_text_base && va < g_text_end && (NP_INTEL || (va & 3) == 0);
 }
 
 static uintptr_t adrp_add_target(uintptr_t pc, uint32_t first, uint32_t second) {
@@ -107,8 +114,49 @@ static uintptr_t adrp_add_target(uintptr_t pc, uint32_t first, uint32_t second) 
     return page + ((second >> 10) & 0xFFF);
 }
 
+#if NP_INTEL
+static uintptr_t x86_function_end(uintptr_t fn, size_t limit) {
+    uintptr_t start, end;
+    if (np_function_bounds(g_image, g_slide, fn, &start, &end) != 0 || start != fn) return fn;
+    return end < fn + limit ? end : fn + limit;
+}
+#endif
+
 static uintptr_t find_accessor(uintptr_t register_fn, uintptr_t text_base,
                                size_t text_size, int *out_sites) {
+#if NP_INTEL
+    uintptr_t winner = 0;
+    int agree = 0;
+    const uint8_t *bytes = (const void *)text_base;
+    for (size_t i = 0; i + 5 <= text_size; i++) {
+        if (bytes[i] != 0xe8) continue;
+        int32_t relative;
+        memcpy(&relative, bytes + i + 1, sizeof(relative));
+        uintptr_t call = text_base + i;
+        if (call + 5 + relative != register_fn) continue;
+        uintptr_t start, end;
+        if (np_function_bounds(g_image, g_slide, call, &start, &end) != 0) continue;
+        uintptr_t previous = 0, pc = start;
+        while (pc < call) {
+            x86_insn_decode_t insn;
+            if (!np_x86_decode(pc, end, &insn)) break;
+            uintptr_t target = np_x86_call(pc, &insn);
+            if (target) previous = target;
+            pc += insn.length;
+        }
+        if (pc != call || !previous) continue;
+        if (!in_text(previous)) return 0;
+        if (winner && winner != previous) {
+            NP_ERR("webui: Intel registry accessor callers disagree");
+            return 0;
+        }
+        winner = previous;
+        agree++;
+    }
+    if (agree < MIN_SITES) return 0;
+    if (out_sites) *out_sites = agree;
+    return winner;
+#else
     uintptr_t end = text_base + text_size;
     uintptr_t winner = 0;
     int agree = 0, disagree = 0, silent = 0;
@@ -153,10 +201,28 @@ static uintptr_t find_accessor(uintptr_t register_fn, uintptr_t text_base,
                "instructions this reads", silent);
     if (out_sites) *out_sites = agree;
     return winner;
+#endif
 }
 
 // request-body parse
 static uintptr_t find_parse(uintptr_t dispatch_fn) {
+#if NP_INTEL
+    uintptr_t found = 0, end = x86_function_end(dispatch_fn, FN_SPAN_MAX);
+    int hits = 0;
+    for (uintptr_t pc = dispatch_fn; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        uintptr_t called = np_x86_call(pc, &insn);
+        uintptr_t next = pc + insn.length;
+        if (called && next + 2 <= end && memcmp((const void *)next, "\x84\xc0", 2) == 0) {
+            found = called;
+            hits++;
+        }
+        pc = next;
+    }
+    if (hits != 1) NP_ERR("webui: Intel dispatcher has %d candidate parse calls", hits);
+    return hits == 1 ? found : 0;
+#else
     uintptr_t found = 0;
     int hits = 0;
 
@@ -175,6 +241,7 @@ static uintptr_t find_parse(uintptr_t dispatch_fn) {
         return 0;
     }
     return found;
+#endif
 }
 
 int np_webui_init(const struct mach_header_64 *mh, intptr_t slide,
@@ -182,6 +249,8 @@ int np_webui_init(const struct mach_header_64 *mh, intptr_t slide,
                   uintptr_t send_response) {
     if (!mh || !register_fn || !dispatch_fn || !send_response) return 0;
 
+    g_image = mh;
+    g_slide = slide;
     size_t text_size = 0;
     if (np_get_section_containing(mh, slide, register_fn, &g_text_base, &text_size) != 0) {
         NP_ERR("webui: the register function at 0x%lx belongs to no section",
@@ -208,6 +277,9 @@ int np_webui_init(const struct mach_header_64 *mh, intptr_t slide,
     uintptr_t accessor = find_accessor(register_fn, g_text_base, text_size, &sites);
     if (!accessor) return 0;
 
+    uintptr_t parse = find_parse(dispatch_fn);
+    if (!parse) return 0;
+
     uintptr_t registry = ((np_registry_accessor_fn)accessor)();
     if (!np_plausible_ptr(registry)) {
         NP_ERR("webui: accessor 0x%lx returned 0x%lx, which is no registry",
@@ -218,7 +290,7 @@ int np_webui_init(const struct mach_header_64 *mh, intptr_t slide,
     g_registry      = registry;
     g_register_fn   = register_fn;
     g_send_response = send_response;
-    g_parse         = find_parse(dispatch_fn);
+    g_parse         = parse;
     NP_LOG("webui: registry 0x%lx via accessor 0x%lx, agreed by %d of the client's "
            "own route registrations", (unsigned long)registry,
            (unsigned long)accessor, sites);
@@ -235,6 +307,28 @@ int np_webui_parse_into(uintptr_t message, const void *bytes, uint32_t len) {
 }
 
 uintptr_t np_webui_lookup_site(uintptr_t register_fn, uintptr_t dispatch_fn) {
+#if NP_INTEL
+    if (!register_fn || !dispatch_fn) return 0;
+    uintptr_t lookup = 0, end = x86_function_end(register_fn, FN_SPAN_MAX);
+    for (uintptr_t pc = register_fn; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        lookup = np_x86_call(pc, &insn);
+        if (lookup) break;
+        pc += insn.length;
+    }
+    if (!lookup) return 0;
+    uintptr_t site = 0;
+    int hits = 0;
+    end = x86_function_end(dispatch_fn, FN_SPAN_MAX);
+    for (uintptr_t pc = dispatch_fn; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        if (np_x86_call(pc, &insn) == lookup) { site = pc; hits++; }
+        pc += insn.length;
+    }
+    return hits == 1 ? site : 0;
+#else
     if (!register_fn || !dispatch_fn) return 0;
 
     uintptr_t lookup = 0;
@@ -267,6 +361,7 @@ uintptr_t np_webui_lookup_site(uintptr_t register_fn, uintptr_t dispatch_fn) {
     NP_DBG("webui: route lookup 0x%lx called from 0x%lx",
            (unsigned long)lookup, (unsigned long)site);
     return site;
+#endif
 }
 
 static const char *route_at(uintptr_t elements, int index) {
@@ -336,6 +431,16 @@ static uintptr_t branch_target(uint32_t insn, uintptr_t pc, int *cond) {
 
 // This was painful, WIP, don't change unless you are me
 static int fn_calls(uintptr_t fn, uintptr_t target) {
+#if NP_INTEL
+    uintptr_t end = x86_function_end(fn, FN_SPAN_MAX);
+    for (uintptr_t pc = fn; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        if (np_x86_call(pc, &insn) == target) return 1;
+        pc += insn.length;
+    }
+    return 0;
+#else
     uintptr_t furthest = fn;
 
     for (uintptr_t pc = fn; pc < fn + FN_SPAN_MAX; pc += 4) {
@@ -357,6 +462,7 @@ static int fn_calls(uintptr_t fn, uintptr_t target) {
         if (returns && pc >= furthest) break;
     }
     return 0;
+#endif
 }
 
 static int vtable_run(uintptr_t vptr) {
@@ -385,6 +491,30 @@ static int handler_slot(uintptr_t vptr, int run) {
 
 // The job vtable a factory installs
 static uintptr_t vtable_from_factory(uintptr_t factory, int *slot_out, int *run_out) {
+#if NP_INTEL
+    uintptr_t ctor = 0, end = x86_function_end(factory, FN_SPAN_MAX);
+    for (uintptr_t pc = factory; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        ctor = np_x86_call(pc, &insn);
+        if (ctor) break;
+        pc += insn.length;
+    }
+    if (!in_text(ctor)) return 0;
+    end = x86_function_end(ctor, FN_SPAN_MAX);
+    for (uintptr_t pc = ctor; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        uintptr_t candidate = insn.primary_opcode == 0x8d ? np_x86_rip(pc, &insn) : 0;
+        if (candidate >= g_const_base + 16 && candidate + 8 * VT_SLOTS < g_const_end) {
+            int run = vtable_run(candidate);
+            int slot = run >= VT_RUN_MIN ? handler_slot(candidate, run) : -1;
+            if (slot >= 0) { *slot_out = slot; *run_out = run; return candidate; }
+        }
+        pc += insn.length;
+    }
+    return 0;
+#else
     uintptr_t ctor = 0;
     for (uintptr_t pc = factory; pc < factory + FN_SPAN_MAX; pc += 4)
         if (bl_target(*(const uint32_t *)pc, pc, &ctor)) break;
@@ -415,6 +545,7 @@ static uintptr_t vtable_from_factory(uintptr_t factory, int *slot_out, int *run_
     NP_DBG("webui: nothing in the job builder at 0x%lx reads as a job class built on "
            "a single base", (unsigned long)ctor);
     return 0;
+#endif
 }
 
 // Every route shares one job class, so one handler serves them all
@@ -545,6 +676,20 @@ static uintptr_t find_literal(const char *s) {
 }
 
 static int notify_slot(uintptr_t vtable, uintptr_t task_name) {
+#if NP_INTEL
+    for (int slot = 0; slot < VT_SLOTS; slot++) {
+        uintptr_t fn = *(const uintptr_t *)(vtable + 8 * (uintptr_t)slot);
+        if (!in_text(fn)) continue;
+        uintptr_t end = x86_function_end(fn, FN_SPAN_MAX);
+        for (uintptr_t pc = fn; pc < end;) {
+            x86_insn_decode_t insn;
+            if (!np_x86_decode(pc, end, &insn)) break;
+            if (np_x86_rip(pc, &insn) == task_name) return slot;
+            pc += insn.length;
+        }
+    }
+    return -1;
+#else
     for (int slot = 0; slot < VT_SLOTS; slot++) {
         uintptr_t fn = *(const uintptr_t *)(vtable + 8 * (uintptr_t)slot);
         if (!in_text(fn)) continue;
@@ -557,6 +702,7 @@ static int notify_slot(uintptr_t vtable, uintptr_t task_name) {
         }
     }
     return -1;
+#endif
 }
 
 uintptr_t np_webui_new_message(uintptr_t vptr) {

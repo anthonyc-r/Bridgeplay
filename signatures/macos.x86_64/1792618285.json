@@ -1,0 +1,256 @@
+{
+  "schema_version": 3,
+  "profile_version": 1,
+  "arch": "x86_64",
+  "platform": "macos",
+  "steam_build": 1792618285,
+  "steam_build_date": "2026-10-21T21:31:25+00:00",
+  "signatures": [
+    {
+      "name": "CCompatManager::Init",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 58 48 89 FB 48 8B 05 53 F5 14 01 48 8B 00 48 89 45 D0 4C 8D 7D B0 49 C7 07 00 00 00 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x65de1a",
+      "function_start": "0x65de1a",
+      "function_end": "0x65e832",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::BIsCompatibilityToolEnabled",
+      "aob_hex": "55 48 89 E5 41 57 41 56 53 48 83 EC 18 41 89 F6 48 89 FB 89 75 E4 48 8B 05 0D 73 15 01 83 38 00 74 17 48 8D 3D 18 71 05 01",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x655f36",
+      "function_start": "0x655f36",
+      "function_end": "0x656078",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::YldRegisterTool",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 48 49 89 F4 48 89 FB 48 8B 05 9E 31 15 01 83 38 00 74 17 48 8D 3D 36 3C 05 01",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x65a0a4",
+      "function_start": "0x65a0a4",
+      "function_end": "0x65a5a0",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::GetOSListOverrideForApp.oslist_gate",
+      "aob_hex": "48 85 C0 74 A4 4D 85 F6 74 60 41 81 7C 24 20 80 B9 2F 00 75 3C 48 8D 05 D0 74 05 01 EB 49 48 8D 3D 5A 74 05 01 48 8D 15 AF 74 05 01",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x655b87",
+      "function_start": "0x655ad6",
+      "function_end": "0x655c3c",
+      "site_kind": "instruction"
+    },
+    {
+      "name": "CCompatManager::ResolveCompatToolForApp.local_redirect",
+      "aob_hex": "8B 70 68 85 F6 0F 84 B4 00 00 00 48 8D 05 04 4F 32 01 BF 88 16 00 00 48 03 38 31 D2 E8 97 0D F0 FF 49 89 06 48 85 C0 0F 84 B8 00 00 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x655c72",
+      "function_start": "0x655c3c",
+      "function_end": "0x655d7c",
+      "site_kind": "instruction"
+    },
+    {
+      "name": "CAppManager::TerminateProcessByPid",
+      "aob_hex": "55 48 89 E5 41 57 41 56 53 50 89 FB E8 47 08 31 01 49 89 C6 48 8B 3D 49 7B 82 01 48 8B 35 D2 79 82 01 4C 8B 3D 83 C1 6D 01",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0xd12f4",
+      "function_start": "0xd12f4",
+      "function_end": "0xd1349",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::FindToolForTargetApp",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 54 53 48 83 EC 10 89 75 D8 80 BF 10 08 00 00 01 0F 85 4C 01 00 00 41 89 F6 48 89 FB 48 8D 05 84 54 32 01",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x6556d8",
+      "function_start": "0x6556d8",
+      "function_end": "0x655856",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::GetValidPlatforms",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 50 89 F3 49 89 FC 48 8D 05 8E 6B 32 01 41 BE 40 15 00 00 4C 03 30 4C 89 F7 E8 87 35 EF FF",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x653fe0",
+      "function_start": "0x653fe0",
+      "function_end": "0x65410e",
+      "site_kind": "function"
+    },
+    {
+      "name": "CWebUIJobDispatcher::RegisterHandler",
+      "aob_hex": "55 48 89 E5 41 57 41 56 53 50 49 89 F6 48 89 FB 48 8B 06 48 8B 00 48 8D 75 E0 48 89 06 4C 8D 7F 60 4C 89 FF E8 15 0D 00 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x898b4",
+      "function_start": "0x898b4",
+      "function_end": "0x89954",
+      "site_kind": "function"
+    },
+    {
+      "name": "CWebUITransport::DispatchJob",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 81 EC 88 01 00 00 49 89 F6 48 89 FB 48 8B 05 F5 38 72 01 48 8B 00 48 89 45 D0",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x89a72",
+      "function_start": "0x89a72",
+      "function_end": "0x89eba",
+      "site_kind": "function"
+    },
+    {
+      "name": "CWebUIMsgJob::SendResponse",
+      "aob_hex": "55 48 89 E5 41 56 53 48 89 F3 49 89 FE 48 8B 7E 18 48 85 FF 0F 84 CC 00 00 00 8B 03 48 8B 4F 30 81 49 10 00 00 00 20 89 81 D8 00 00 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x89f3e",
+      "function_start": "0x89f3e",
+      "function_end": "0x8a038",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::SetCompatToolMapping",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 50 49 89 CE 49 89 D7 48 89 FB 85 F6 74 44 41 89 F5 BF D0 01 00 00 44 89 45 D4 E8 C2 C1 D8 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x655490",
+      "function_start": "0x655490",
+      "function_end": "0x655520",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::InternalSpecifyCompatTool",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 48 45 89 C7 49 89 CC 49 89 D5 41 89 F6 48 89 FB 48 8B 05 2D 8D 15 01 83 38 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x65450c",
+      "function_start": "0x65450c",
+      "function_end": "0x6548a8",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::FindMapping",
+      "aob_hex": "55 48 89 E5 48 83 EC 10 89 75 FC 85 F6 74 1A 48 81 C7 F8 03 00 00 48 8D 75 FC E8 07 FD FF FF 48 85 C0 74 3B 48 8B 00 EB 38",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x6558a0",
+      "function_start": "0x6558a0",
+      "function_end": "0x655908",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::GetWildcardMapping",
+      "aob_hex": "55 48 89 E5 41 57 41 56 53 48 83 EC 18 85 F6 0F 84 95 00 00 00 41 89 F6 49 89 FF 48 8D 75 E0 C7 06 00 00 00 00 48 81 C7 F8 03 00 00",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x655908",
+      "function_start": "0x655908",
+      "function_end": "0x655aa2",
+      "site_kind": "function"
+    },
+    {
+      "name": "CCompatManager::WindowsOnlyLookup",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 18 83 7F 44 00 0F 84 EB 00 00 00 49 89 F6 49 89 FF 48 89 55 D0 8B 06 89 C1",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0xa1fc64",
+      "function_start": "0xa1fc64",
+      "function_end": "0xa1fd7c",
+      "site_kind": "function"
+    },
+    {
+      "name": "CUserShortcuts::SetShortcutExe",
+      "aob_hex": "55 48 89 E5 41 57 41 56 53 50 48 89 CB 89 F0 49 89 FE 8B 7F 38 83 FF FF 74 26 49 8B 4E 50 48 8D 71 04 48 63 FF 48 C1 E7 05",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0xacb32c",
+      "function_start": "0xacb32c",
+      "function_end": "0xacb3d8",
+      "site_kind": "function"
+    },
+    {
+      "name": "LaunchBuilder::SteamVRSupportCheck",
+      "aob_hex": "55 48 89 E5 41 56 53 89 F3 48 8B 07 FF 50 50 84 C0 74 4B 48 8D 05 54 C9 E8 00 41 BE 40 15 00 00 4C 03 30 4C 89 F7 E8 4D 93 A5 FF",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0xaee21a",
+      "function_start": "0xaee21a",
+      "function_end": "0xaee27e",
+      "site_kind": "function"
+    },
+    {
+      "name": "steamui::ShortcutExtensionMatches",
+      "module": "steamui.dylib",
+      "aob_hex": "55 48 89 E5 53 50 48 89 F3 48 8B 3F E8 BA D8 AD 00 48 85 C0 74 17 48 8B 33 BA FF FF FF 7F 48 89 C7 E8 1F DA AD 00 85 C0",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x9aad5",
+      "function_start": "0x9aad5",
+      "function_end": "0x9ab0c",
+      "site_kind": "function"
+    },
+    {
+      "name": "steamui::ShortcutIconRender",
+      "module": "steamui.dylib",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 38 41 89 F7 49 89 FE E8 83 E2 AD 00 49 89 C4 48 8B 3D DF 22 F2 00 49 8B 06",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x9ac53",
+      "function_start": "0x9ac53",
+      "function_end": "0x9ae1e",
+      "site_kind": "function"
+    },
+    {
+      "name": "steamui::ShortcutCreate",
+      "module": "steamui.dylib",
+      "aob_hex": "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 81 EC 98 01 00 00 B3 01 83 7F 3C 20 0F 84 91 03 00 00 41 89 F7 49 89 FE 48 8B 07",
+      "anchor": {
+        "kind": "aob"
+      },
+      "func_addr_this_build": "0x5385b8",
+      "function_start": "0x5385b8",
+      "function_end": "0x538a44",
+      "site_kind": "function"
+    }
+  ],
+  "module_uuids": {
+    "steamclient.dylib": "baa4be54-51d7-3af8-9982-62d5f80547b6",
+    "steamui.dylib": "1a6de20e-a8e9-3ceb-85bf-8256b28bcc99"
+  },
+  "module_slice_sha256": {
+    "steamclient.dylib": "418dc4f5c8048247c7e1905ca91843b2d433e7bd71e7a353350108eb883935a9",
+    "steamui.dylib": "7f9dfcbcffa426f90073ff8e6f7a42da50173ada88ef70ab73b61126830174c1"
+  },
+  "module_file_sha256": {
+    "steamclient.dylib": "b9d62be2ac64b77dc77e1d19eefcf3880df99495c7db85b30623095310b6a6bd",
+    "steamui.dylib": "80d66dc75fad384f06898c450addefb1e32a016993d32a3ca93ea300f3efbb3f"
+  }
+}

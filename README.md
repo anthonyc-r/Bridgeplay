@@ -2,6 +2,11 @@
   <a href="https://bridgeplay.dev"><img src="docs/readme/banner-v6.png" alt="Bridgeplay: Windows games, in your Mac's Steam" width="100%"></a>
 </p>
 
+> **Intel macOS fork:** this fork adds native Steam integration for Intel Macs on
+> macOS 26, using WineCX and DXMT. See [Intel build, installation and validation](docs/INTEL-PORT.md).
+> Build the Intel app from this fork; the upstream download and automatic update feed
+> carry the Apple Silicon version. The upstream overview below describes that version.
+
 <p align="center">
   <b>Windows-only Steam games on Apple Silicon, right inside the Steam you already use.</b><br>
   Same library. Same Play button. No bottles, no second launcher.
@@ -89,7 +94,7 @@ The Setup Assistant's graphics download carries Apple's Game Porting Toolkit red
 
 | | |
 |---|---|
-| Mac | Apple Silicon, M1 or later. Intel Macs are not supported. |
+| Mac | Apple Silicon, M1 or later; this fork also provides an [Intel port](docs/INTEL-PORT.md). |
 | macOS | 26 or later ([macOS version guide](https://bridgeplay.dev/guides/macos-version-requirements)) |
 | Steam | A Steam account. Windows games install from Steam as usual. |
 | Download | About 550 MB: a 19 MB disk image, then about 530 MB, most of it the engine, that the Setup Assistant fetches. Installing Rosetta 2 and Steam, and signing in to Steam, need internet. |

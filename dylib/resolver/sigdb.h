@@ -26,6 +26,9 @@ typedef struct {
     int             sigdb_version;
     uint64_t        steam_build;
     char            steam_build_date[32];
+    char            arch[16];
+    char            client_uuid[37];
+    char            ui_uuid[37];
 } np_sigdb_t;
 
 int  np_load_profile(const char *path, np_sigdb_t *out);

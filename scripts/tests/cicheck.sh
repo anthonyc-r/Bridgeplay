@@ -289,7 +289,7 @@ else
 		gitq -C "$repo" commit -q -m c3
 		c3=$(git -C "$repo" rev-parse HEAD)
 	}
-	walk() { (PATH="$work/bin:$PATH" && ci_passed); }
+	walk() { (export ARCH="${TEST_ARCH:-arm64}" PATH="$work/bin:$PATH"; ci_passed); }
 
 	reset_fake
 	jobs_file 11 success success success success
@@ -310,6 +310,9 @@ else
 	jobs_file 33 success success success success
 	printf '33\n' >"$FAKE_DIR/runs.$c3"
 	eq "ci_passed: a full run on the bump commit itself" "$c3" "$(walk)"
+	TEST_ARCH=x86_64
+	no "ci_passed: an ARM CI run does not skip Intel checks" walk
+	unset TEST_ARCH
 
 	reset_fake
 	make_history code app/a.c
@@ -374,7 +377,8 @@ yes "build-local.sh reuses runs through ci-run-passed.sh" grep -q 'ci-run-passed
 
 # bridge-key.sh: the outputs build-local.sh and worktree-seed.sh reuse are the ones CI's bridge cache saves
 ci_bridge=$(sed -n '/^          key: bridge-/q;/^          path: |$/,$p' "$app" | sed -n 's/^            \(scratch\/.*\)$/\1/p' | sort)
-eq "bridge-key.sh --outputs = app.yml bridge cache" "$ci_bridge" "$(sh "$root/scripts/bridge-key.sh" --outputs | sort)"
+eq "bridge-key.sh --outputs = app.yml bridge cache" "$ci_bridge" "$(ARCH=arm64 sh "$root/scripts/bridge-key.sh" --outputs | sort)"
+eq "Intel bridge outputs exclude FEX" "$(printf '%s\n' "$ci_bridge" | grep -v wine-build-arm64)" "$(ARCH=x86_64 sh "$root/scripts/bridge-key.sh" --outputs | sort)"
 yes "bridge key is a 16-digit hash" sh -c '[ "$(sh "$1/scripts/bridge-key.sh" | tr -d 0-9a-f)" = "" ] && [ "$(sh "$1/scripts/bridge-key.sh" | wc -c)" -eq 17 ]' _ "$root"
 
 echo "cicheck: $passed passed, $failed failed"

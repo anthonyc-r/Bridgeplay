@@ -69,7 +69,7 @@ struct CompatTool: Sendable, Hashable, Identifiable {
         var unixDir: String { self == .fex ? "aarch64-unix" : "x86_64-unix" }
 
         // CrossOver's FEX build needs Tahoe. Its Rosetta tool runs on Sequoia.
-        static let fexAvailable = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        static let fexAvailable = SetupChecks.isAppleSilicon && ProcessInfo.processInfo.isOperatingSystemAtLeast(
             OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
         )
     }

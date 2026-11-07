@@ -1,16 +1,17 @@
 # Local build
 
-`scripts/build-local.sh` builds the full app on an Apple Silicon Mac with the same make
-targets, in the same order, as `.github/workflows/app.yml`.
+`scripts/build-local.sh` builds for the host Mac architecture with the same make targets,
+in the same order, as `.github/workflows/app.yml`. Intel builds contain the native x86_64
+Steam plugin and x86 Wine bridge. Apple Silicon builds retain the ARM plugin and FEX bridge.
 
 ## Prerequisites
 
-- Xcode 27 at `/Applications/Xcode-beta.app` or `/Applications/Xcode.app`. The script
+- Xcode 26.6 or newer at `/Applications/Xcode-beta.app` or `/Applications/Xcode.app`. The script
   exports `DEVELOPER_DIR` for its own process, so the Command Line Tools can stay the
   active developer dir and you don't need `xcode-select`. To use a different Xcode, set
   `DEVELOPER_DIR` yourself.
 - Homebrew: `brew install cmake mingw-w64 bison flex fontforge gpatch` (bison must be
-  Homebrew's, at `/opt/homebrew/opt/bison/bin`). `shellcheck` and `node` are optional; without
+  Homebrew's, at `$(brew --prefix)/opt/bison/bin`). `shellcheck` and `node` are optional; without
   them the lint and panel checks skip.
 - Font tools: the script installs afdko and fonttools into `scratch/fontvenv`, at the versions
   in `FONT_TOOLS` in app.yml. A direct `make fonts` needs those tools on `PATH`.
@@ -23,6 +24,10 @@ targets, in the same order, as `.github/workflows/app.yml`.
 scripts/build-local.sh            # build only
 scripts/build-local.sh --checks   # build, then `make ci-checks` (the list CI runs) and the Swift tests
 ```
+
+`ARCH=arm64` or `ARCH=x86_64` overrides the host architecture. Xcode 26 uses the
+static app icon; Xcode 27 keeps the layered Icon Composer version. Both builds compile
+all four localizations.
 
 `JOBS=n` overrides the parallelism (default: `hw.ncpu`). Every phase also writes its
 output to `build/logs/<phase>.log`.
@@ -116,3 +121,16 @@ empty. The Swift test bundle only looks for `Sparkle.framework` there, so it fai
 load before any test runs. `make app-tests`, which CI and `--checks` both run, builds the
 tests and then links `PackageFrameworks/Sparkle.framework` to `../Sparkle.framework`. That
 link is a build-product fix-up; no source changes.
+
+## Intel development build on 7 November 2026
+
+The Intel iMac build reused the generated non-CJK fonts and their licenses from upstream
+`v0.7.62`, whose `fonts/` source tree is identical to this checkout. The release archive
+was downloaded from
+`https://github.com/raymondchins/Bridgeplay/releases/download/v0.7.62/Bridgeplay.zip` and
+verified against GitHub's release asset SHA-256:
+`99090e15015fe260eb6dc9bcff6992fbe17caa09201eb7fca793f6cf8cc711d3`.
+Only `payload/fonts/` was extracted into `build/fonts`; none of the upstream executables
+are used in the Intel bundle. CJK fonts remain the existing optional download.
+`build/fonts-provenance.json` records this local build input. A source font rebuild
+still uses `make fonts` and the prerequisite font tools above.

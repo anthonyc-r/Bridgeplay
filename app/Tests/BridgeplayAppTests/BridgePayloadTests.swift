@@ -254,7 +254,13 @@ struct BridgePayloadTests {
     @Test("The entry manifest covers every built path in payload.manifest")
     func coversPayloadManifest() throws {
         let manifest = try PayloadManifest.bundled()
-        let builtPaths = Set(manifest.paths(origin: .built))
+        let builtPaths = Set(manifest.paths(origin: .built).filter { path in
+            #if arch(x86_64)
+            return !path.hasPrefix("aarch64-unix/")
+            #else
+            return true
+            #endif
+        })
         let bridgePaths = Set(BridgePayload.entries.flatMap(\.bridgePaths))
         #expect(builtPaths == bridgePaths, "BridgePayload entries do not match payload.manifest built paths")
     }

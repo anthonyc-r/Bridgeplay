@@ -4,8 +4,9 @@
 
 #include <string.h>
 #include <strings.h>
+#include <stdbool.h>
 
-typedef int (*np_ext_matches_fn)(const char *const *path_slot,
+typedef bool (*np_ext_matches_fn)(const char *const *path_slot,
                                  const char *const *want_slot);
 
 static np_ext_matches_fn g_ext_matches_orig;
@@ -21,7 +22,7 @@ static const char *file_extension(const char *path) {
     return (dot && dot[1]) ? dot + 1 : NULL;
 }
 
-static int np_ext_matches(const char *const *path_slot, const char *const *want_slot) {
+static bool np_ext_matches(const char *const *path_slot, const char *const *want_slot) {
     if (g_ext_matches_orig && g_ext_matches_orig(path_slot, want_slot))
         return 1;
 

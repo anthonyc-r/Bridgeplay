@@ -11,6 +11,7 @@
 #include "../resolver/resolver.h"
 #include "../resolver/anchor.h"
 #include "../resolver/aob.h"
+#include "../util/arch.h"
 #include "../core/macho.h"
 
 #include <dirent.h>
@@ -23,7 +24,7 @@
 #define STEAM_MACOS \
     "/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/"
 #define MAX_IMAGES 4
-#define SIGDB_DIR "signatures/macos.arm64"
+#define SIGDB_DIR "signatures/macos." NP_SIGNATURE_ARCH
 #define MAX_DBS   16
 
 // Locate the loaded image whose name ends with `suffix`.
@@ -143,6 +144,17 @@ typedef struct {
 // code, so they are not signatures and get checked separately. The CompatManager message
 // classes arrived with 1789086785, so the older build has only the one row.
 static const struct { uint64_t build; const char *type_name; uintptr_t vptr; } expected_vptr[] = {
+#if NP_INTEL
+    {1792618285, "14CCompatManager",                              0x1848c88},
+    {1792618285, "21CMsgCompatManagerTool",                       0x17b2260},
+    {1792618285, "22CMsgCompatManagerAlias",                      0x17b2310},
+    {1792618285, "37CCompatManager_GetCompatTools_Request",        0x17b23c0},
+    {1792618285, "38CCompatManager_GetCompatTools_Response",       0x17b2470},
+    {1792618285, "40CCompatManager_SpecifyCompatTool_Request",     0x17b2520},
+    {1792618285, "41CCompatManager_SpecifyCompatTool_Response",    0x17b25d0},
+    {1792618285, "40CCompatManager_StateChanged_Notification",     0x17b2680},
+    {1792618285, "14CUserShortcuts",                              0x1898f80},
+#else
     {1788400362, "14CCompatManager",                              0x1715a00},
 
     {1789086785, "14CCompatManager",                              0x1743ed0},
@@ -163,6 +175,7 @@ static const struct { uint64_t build; const char *type_name; uintptr_t vptr; } e
     {1790904859, "41CCompatManager_SpecifyCompatTool_Response",    0x16ad360},
     {1790904859, "40CCompatManager_StateChanged_Notification",     0x16ad410},
     {1790904859, "14CUserShortcuts",                              0x1793de0},
+#endif
 };
 
 static int run_rtti(const struct mach_header_64 *mh, intptr_t slide,
@@ -257,6 +270,15 @@ static int check_db(dbcheck_t *db) {
                           : np_locate_anchor(im->mh, im->slide, im->text, im->text_sz,
                                              &sig->anchor);
         uintptr_t aob = resolve_by_aob(sig, im->text, im->text_sz);
+        if (NP_INTEL) {
+            np_sigdb_t single = db->sigdb;
+            single.signatures = sig;
+            single.sig_count = 1;
+            np_resolve_result_t result = {0};
+            np_resolve_signatures(im->mh, im->slide, &single, sig->module, &result);
+            anc = np_lookup_address(&result, sig->name);
+            np_free_resolution(&result);
+        }
 
         r->anchor = anc ? anc - (uintptr_t)im->slide : 0;
         r->aob    = aob ? aob - (uintptr_t)im->slide : 0;

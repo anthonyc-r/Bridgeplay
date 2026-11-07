@@ -16,7 +16,7 @@ struct InstallerServiceTests {
     }
 
     private func service(at destination: URL, gate: @escaping @Sendable () throws -> Void = {}) -> InstallerService {
-        InstallerService(destination: destination, ensureAppIsClosed: gate)
+        InstallerService(destination: destination, ensureAppIsClosed: gate, checkReleaseSystem: { try InstallerService.checkSystem($0, supportedHardware: true) })
     }
 
     private func writeApp(at url: URL, identifier: String = InstallerService.bundleIdentifier,
@@ -214,6 +214,12 @@ struct InstallerServiceTests {
             try service(at: destination).state(for: release())
         }
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: destination.path) == target.path)
+    }
+
+    @Test func rejectsAnAppleSiliconReleaseOnUnsupportedHardware() throws {
+        #expect(throws: InstallerError.self) {
+            try InstallerService.checkSystem(release(), supportedHardware: false)
+        }
     }
 
     @Test func rejectsUnsupportedSystemBeforeTouchingDestination() throws {
@@ -491,7 +497,7 @@ struct InstallerServiceTests {
                 throw InstallerError.appValidation("The staged app fixture is missing.")
             }
             try FileManager.default.removeItem(at: stagedApp)
-        })
+        }, checkReleaseSystem: { try InstallerService.checkSystem($0, supportedHardware: true) })
 
         do {
             try service.install(release: release, archive: archive)

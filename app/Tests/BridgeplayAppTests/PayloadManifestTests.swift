@@ -91,10 +91,16 @@ struct PayloadInspectionTests {
         let fex = try #require(SupportedRunners.all.first { $0.flavor == "fex" })
         let state = PayloadInspector.inspect(bridge: bridge, builds: [fex])
         #expect(state.manifestProblem == nil)
+        #if arch(x86_64)
+        #expect(state.expected == 21)
+        #expect(state.missing(origin: .built).count == 6)
+        #expect(!state.missingSteamFiles.contains("aarch64-unix/lsteamclient.so"))
+        #else
         #expect(state.expected == 22)
+        #expect(state.missing(origin: .built).count == 7)
+        #endif
         #expect(state.present == 12)
         #expect(state.missing(origin: .valve).isEmpty)
-        #expect(state.missing(origin: .built).count == 7)
         #expect(state.missing(origin: .patched).count == 3)
         #expect(!state.isComplete)
     }

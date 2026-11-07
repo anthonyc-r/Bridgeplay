@@ -1,0 +1,32 @@
+diff --git a/source/InstructionRelocation/x86/InstructionRelocationX86Shared.cc b/source/InstructionRelocation/x86/InstructionRelocationX86Shared.cc
+index b6bb6a5..061b608 100644
+--- a/source/InstructionRelocation/x86/InstructionRelocationX86Shared.cc
++++ b/source/InstructionRelocation/x86/InstructionRelocationX86Shared.cc
+@@ -51,10 +51,14 @@ int GenRelocateSingleX86Insn(addr_t curr_orig_ip, addr_t curr_relo_ip, uint8_t *
+   auto x86_insn_encode_begin = [&] { x86_insn_encode_start = code_buffer->buffer_size; };
+   auto x86_insn_encode_end = [&] { x86_insn_encoded_len = code_buffer->buffer_size - x86_insn_encode_start; };
+ 
+-  if (insn.primary_opcode >= 0x70 && insn.primary_opcode <= 0x7F) { // jcc rel8
+-    DEBUG_LOG("[x86 relo] %p: jc rel8", buffer_cursor);
+-
+-    int8_t offset = insn.immediate;
++  bool jcc_rel32 = insn.primary_opcode >= 0x80 && insn.primary_opcode <= 0x8F &&
++                   insn.immediate_offset >= 2 &&
++                   buffer_cursor[insn.immediate_offset - 2] == 0x0F &&
++                   insn.insn_spec.operands[0].code == 'J';
++  if ((insn.primary_opcode >= 0x70 && insn.primary_opcode <= 0x7F) || jcc_rel32) {
++    DEBUG_LOG("[x86 relo] %p: jcc relative", buffer_cursor);
++
++    int64_t offset = jcc_rel32 ? (int32_t)insn.immediate : (int8_t)insn.immediate;
+     addr_t orig_dst_ip = curr_orig_ip + offset;
+ #if defined(TARGET_ARCH_IA32)
+     uint8_t opcode = 0x80 | (insn.primary_opcode & 0x0f);
+@@ -66,7 +70,7 @@ int GenRelocateSingleX86Insn(addr_t curr_orig_ip, addr_t curr_relo_ip, uint8_t *
+ #else
+     // jcc_true stage 1
+     const uint8_t label_jcc_cond_true_stage2 = 2;
+-    __ Emit<int8_t>(insn.primary_opcode);
++    __ Emit<int8_t>(0x70 | (insn.primary_opcode & 0x0F));
+     __ Emit<int8_t>(label_jcc_cond_true_stage2);
+ 
+     // jcc_false

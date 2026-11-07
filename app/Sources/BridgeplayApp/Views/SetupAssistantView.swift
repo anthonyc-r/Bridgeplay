@@ -165,9 +165,9 @@ struct SetupAssistantView: View {
         StepHeader(step: model.step, title: "Check your Mac",
                    detail: "Bridgeplay runs Windows games from your Steam library. First, a few quick checks.")
         SetupCard {
-            checked(0, StatusRow(title: String(localized: "Apple silicon"),
-                      value: model.appleSilicon ? SetupChecks.chipName : String(localized: "Bridgeplay doesn't run on Intel Macs."),
-                      tone: model.appleSilicon ? .ok : .bad))
+            checked(0, StatusRow(title: String(localized: "Processor"),
+                      value: model.nativeIntegrationAvailable ? SetupChecks.chipName : String(localized: "This build does not include Intel Steam support."),
+                      tone: model.nativeIntegrationAvailable ? .ok : .bad))
             SetupHairline()
             checked(1, StatusRow(title: String(localized: "macOS \(SetupChecks.minimumMacOS) or later"),
                       value: model.macOSSupported ? SetupChecks.macOSDisplay : String(localized: "\(SetupChecks.macOSDisplay). Update macOS first."),
@@ -176,65 +176,76 @@ struct SetupAssistantView: View {
             checked(2, StatusRow(title: String(localized: "Free space"),
                       value: model.freeBytes.map { String(localized: "\(ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)) available, 3 GB needed") },
                       tone: model.hasSpace ? .ok : .bad))
-            SetupHairline()
-            checked(3, StatusRow(title: String(localized: "Rosetta 2"),
+            if model.appleSilicon {
+                SetupHairline()
+                checked(3, StatusRow(title: String(localized: "Rosetta 2"),
                       value: model.rosettaInstalled ? String(localized: "Installed.") : model.rosettaNote ?? String(localized: "Apple's translator for Windows games. Asks for your Mac password."),
                       tone: model.rosettaInstalled ? .ok : .warning,
                       action: model.rosettaInstalled ? nil : StatusAction(
                         label: String(localized: "Install"), isProminent: true, isEnabled: !model.isWorking
                       ) { Task { await model.installRosetta() } }))
+            }
         }
     }
 
     @ViewBuilder
     private var graphicsStep: some View {
-        StepHeader(step: model.step, title: "Add Apple's game graphics",
-                   detail: "Apple's Game Porting Toolkit (D3DMetal) runs DirectX 11 and 12 games on Metal. Bridgeplay can download it for you under Apple's non-commercial license, or add your own copy from Apple.")
-        SetupCard {
-            if let gptk = model.gptk {
-                WizardRow(row: StatusRow(title: String(localized: "Game Porting Toolkit"),
-                          value: String(localized: "Ready from \(gptk.libRoot.path(percentEncoded: false))."),
-                          tone: .ok, trailing: gptk.version))
-            } else {
-                // Apple's files unmodified, from Bridgeplay's installer release; Steam comes along when it's missing.
-                WizardRow(row: StatusRow(title: String(localized: "Download with Bridgeplay"),
-                          value: DownloadMeter.shared.title ?? model.gptkProgress
-                            ?? String(localized: "About 500 MB. Also installs Steam if this Mac doesn't have it yet."),
-                          action: StatusAction(label: String(localized: "Download"), isProminent: true, isEnabled: !model.isWorking) {
-                              Task { await model.downloadGPTK() }
-                          }), symbol: "arrow.down.circle")
-                SetupHairline()
-                WizardRow(row: StatusRow(title: String(localized: "Or download it from Apple"),
-                          value: String(localized: "Sign in, then download the latest Game Porting Toolkit .dmg."),
-                          action: StatusAction(label: String(localized: "Open Apple Downloads")) {
-                              NSWorkspace.shared.open(URL(string: "https://developer.apple.com/download/all/?q=Game%20Porting%20Toolkit")!)
-                          }), number: 1)
-                SetupHairline()
-                if let image = model.gptkImages.first {
-                    WizardRow(row: StatusRow(title: String(localized: "Use the one in Downloads"),
-                              value: image.lastPathComponent,
-                              action: StatusAction(label: String(localized: "Use This"), isEnabled: !model.isWorking) {
-                                  Task { await model.importGPTK(image) }
-                              }), number: 2)
+        if !model.appleSilicon {
+            StepHeader(step: model.step, title: "Graphics for your Mac",
+                       detail: "DXMT runs DirectX 10 and 11 games on Metal. It is included with the WineCX engine.")
+            SetupCard {
+                WizardRow(row: StatusRow(title: "DXMT",
+                          value: String(localized: "Ready to install with WineCX."), tone: .ok))
+            }
+        } else {
+            StepHeader(step: model.step, title: "Add Apple's game graphics",
+                       detail: "Apple's Game Porting Toolkit (D3DMetal) runs DirectX 11 and 12 games on Metal. Bridgeplay can download it for you under Apple's non-commercial license, or add your own copy from Apple.")
+            SetupCard {
+                if let gptk = model.gptk {
+                    WizardRow(row: StatusRow(title: String(localized: "Game Porting Toolkit"),
+                              value: String(localized: "Ready from \(gptk.libRoot.path(percentEncoded: false))."),
+                              tone: .ok, trailing: gptk.version))
                 } else {
-                    WizardRow(row: StatusRow(title: String(localized: "Add the disk image"),
-                              value: String(localized: "Drag the .dmg onto this window, or choose it."),
-                              action: StatusAction(label: String(localized: "Choose…"), isEnabled: !model.isWorking) { chooseImage() }),
-                              number: 2)
+                    // Apple's files unmodified, from Bridgeplay's installer release; Steam comes along when it's missing.
+                    WizardRow(row: StatusRow(title: String(localized: "Download with Bridgeplay"),
+                              value: DownloadMeter.shared.title ?? model.gptkProgress
+                                ?? String(localized: "About 500 MB. Also installs Steam if this Mac doesn't have it yet."),
+                              action: StatusAction(label: String(localized: "Download"), isProminent: true, isEnabled: !model.isWorking) {
+                                  Task { await model.downloadGPTK() }
+                              }), symbol: "arrow.down.circle")
+                    SetupHairline()
+                    WizardRow(row: StatusRow(title: String(localized: "Or download it from Apple"),
+                              value: String(localized: "Sign in, then download the latest Game Porting Toolkit .dmg."),
+                              action: StatusAction(label: String(localized: "Open Apple Downloads")) {
+                                  NSWorkspace.shared.open(URL(string: "https://developer.apple.com/download/all/?q=Game%20Porting%20Toolkit")!)
+                              }), number: 1)
+                    SetupHairline()
+                    if let image = model.gptkImages.first {
+                        WizardRow(row: StatusRow(title: String(localized: "Use the one in Downloads"),
+                                  value: image.lastPathComponent,
+                                  action: StatusAction(label: String(localized: "Use This"), isEnabled: !model.isWorking) {
+                                      Task { await model.importGPTK(image) }
+                                  }), number: 2)
+                    } else {
+                        WizardRow(row: StatusRow(title: String(localized: "Add the disk image"),
+                                  value: String(localized: "Drag the .dmg onto this window, or choose it."),
+                                  action: StatusAction(label: String(localized: "Choose…"), isEnabled: !model.isWorking) { chooseImage() }),
+                                  number: 2)
+                    }
                 }
             }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            guard !model.isWorking, let url = urls.first(where: { $0.pathExtension.lowercased() == "dmg" }) else { return false }
-            Task { await model.importGPTK(url) }
-            return true
-        }
-        if model.gptk == nil {
-            Text("Optional. If you skip it, games use DXMT, which runs DirectX 10 and 11 games only. You can add the toolkit later from Status.")
-                .font(BP.sans(12))
-                .foregroundStyle(BP.fg3)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 2)
+            .dropDestination(for: URL.self) { urls, _ in
+                guard !model.isWorking, let url = urls.first(where: { $0.pathExtension.lowercased() == "dmg" }) else { return false }
+                Task { await model.importGPTK(url) }
+                return true
+            }
+            if model.gptk == nil {
+                Text("Optional. If you skip it, games use DXMT, which runs DirectX 10 and 11 games only. You can add the toolkit later from Status.")
+                    .font(BP.sans(12))
+                    .foregroundStyle(BP.fg3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
+            }
         }
     }
 
@@ -482,14 +493,14 @@ struct SetupAssistantView: View {
                     .disabled(!model.macReady || model.isWorking)
                     .keyboardShortcut(.defaultAction)
             case .graphics:
-                if model.gptk == nil {
+                if model.appleSilicon && model.gptk == nil {
                     Button("Skip") { go(forward: true) { model.advance() } }
                         .buttonStyle(.pillSecondaryLarge)
                         .disabled(model.isWorking)
                 }
                 Button("Continue") { go(forward: true) { model.advance() } }
                     .buttonStyle(.pillLarge)
-                    .disabled(model.gptk == nil || model.isWorking)
+                    .disabled((model.appleSilicon && model.gptk == nil) || model.isWorking)
                     .keyboardShortcut(.defaultAction)
             case .steam:
                 Button("Continue") { go(forward: true) { model.advance() } }

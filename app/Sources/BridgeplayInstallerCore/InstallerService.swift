@@ -26,6 +26,7 @@ public struct InstallerService: Sendable {
 
     public let destination: URL
     private let ensureAppIsClosed: @Sendable () throws -> Void
+    private let checkReleaseSystem: @Sendable (InstallerRelease) throws -> Void
 
     public init(destination: URL = URL(fileURLWithPath: "/Applications/Bridgeplay.app", isDirectory: true)) {
         self.init(destination: destination, ensureAppIsClosed: { try Self.requireAppIsClosed() })
@@ -33,15 +34,17 @@ public struct InstallerService: Sendable {
 
     init(
         destination: URL,
-        ensureAppIsClosed: @escaping @Sendable () throws -> Void
+        ensureAppIsClosed: @escaping @Sendable () throws -> Void,
+        checkReleaseSystem: @escaping @Sendable (InstallerRelease) throws -> Void = { try Self.checkSystem($0) }
     ) {
         self.destination = destination
         self.ensureAppIsClosed = ensureAppIsClosed
+        self.checkReleaseSystem = checkReleaseSystem
     }
 
     public func state(for release: InstallerRelease) throws -> InstallationState {
         try recoverIfNeeded()
-        try Self.checkSystem(release)
+        try checkReleaseSystem(release)
         let target = transactionDestination
         guard try Self.pathExistsWithoutSymlink(target) else { return .notInstalled }
         let current = try Self.readBundle(at: target)
@@ -92,7 +95,7 @@ public struct InstallerService: Sendable {
     /// Verify, stage and install a release archive. The prior app is restored if replacement fails.
     @discardableResult
     public func install(release: InstallerRelease, archive: URL) throws -> URL {
-        try Self.checkSystem(release)
+        try checkReleaseSystem(release)
         guard archive.isFileURL, destination.isFileURL,
               destination.lastPathComponent == Self.applicationName else {
             throw InstallerError.invalidDestination
@@ -219,18 +222,24 @@ public struct InstallerService: Sendable {
         return parent.appending(path: normalized.lastPathComponent, directoryHint: .isDirectory)
     }
 
-    private static func checkSystem(_ release: InstallerRelease) throws {
+    static var supportedHardware: Bool {
+        #if arch(arm64)
+        true
+        #else
+        false
+        #endif
+    }
+
+    static func checkSystem(_ release: InstallerRelease, supportedHardware: Bool = Self.supportedHardware) throws {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         let current = [version.majorVersion, version.minorVersion, version.patchVersion]
             .map(String.init).joined(separator: ".")
         if compareVersions(current, release.minimumOS) == .orderedAscending {
             throw InstallerError.unsupportedSystem(minimum: release.minimumOS)
         }
-        #if arch(arm64)
-        // Supported hardware for Bridgeplay.
-        #else
-        throw InstallerError.unsupportedSystem(minimum: "Apple silicon")
-        #endif
+        guard supportedHardware else {
+            throw InstallerError.unsupportedSystem(minimum: "Apple silicon")
+        }
     }
 
     private static func readBundle(at url: URL) throws -> BundleInfo {

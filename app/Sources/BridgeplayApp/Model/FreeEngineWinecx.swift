@@ -261,7 +261,8 @@ enum FreeEngineWinecx {
                 .i386Windows: "628d08854dc42009f63dc489005c2a49a3f1fe4c6a949dc1ac505915004e5b70",
             ],
             tools: [
-                CompatTool(name: "bridgeplay-proton-winecx-11.17", flavor: .rosetta, display: "WineCX 11.17 (msync, D3DMetal)"),
+                CompatTool(name: "bridgeplay-proton-winecx-11.17", flavor: .rosetta,
+                           display: SetupChecks.isAppleSilicon ? "WineCX 11.17 (msync, D3DMetal)" : "WineCX 11.17 (msync, DXMT)"),
             ],
             isFree: true
         ),
@@ -355,7 +356,8 @@ enum FreeEngineWinecx {
                 .i386Windows: "ffdf7f49a4b07b582a1172092a4af452b5beb7377b59f423cb2d1a1e9c18c9af",
             ],
             tools: [
-                CompatTool(name: "bridgeplay-proton-winecx", flavor: .rosetta, display: "WineCX 11.15 (msync, D3DMetal)"),
+                CompatTool(name: "bridgeplay-proton-winecx", flavor: .rosetta,
+                           display: SetupChecks.isAppleSilicon ? "WineCX 11.15 (msync, D3DMetal)" : "WineCX 11.15 (msync, DXMT)"),
             ],
             isFree: true
         ),
@@ -592,7 +594,7 @@ enum FreeEngineWinecx {
     }
 
     // Puts each bundled file, checked against its pin, over or beside the engine's own.
-    static func installBundled(_ files: [WinecxBundledFile], root: URL, bundle: Bundle = .module) throws {
+    static func installBundled(_ files: [WinecxBundledFile], root: URL, bundle: Bundle = AppResources.bundle) throws {
         let fm = FileManager.default
         for file in files {
             let destination = root.appending(path: file.path)
@@ -615,7 +617,7 @@ enum FreeEngineWinecx {
 
     // The app's copy of a bundled file. Each failure says which check failed (#1295 could
     // not tell a missing file from a damaged one), and the log gets the path and hashes.
-    static func bundledSource(_ file: WinecxBundledFile, in bundle: Bundle = .module) throws -> URL {
+    static func bundledSource(_ file: WinecxBundledFile, in bundle: Bundle = AppResources.bundle) throws -> URL {
         let name = "\(file.resource).\(file.ext)"
         guard let source = bundle.url(forResource: file.resource, withExtension: file.ext) else {
             AppLog.note("bundled file: \(name) not found in \(bundle.bundleURL.path(percentEncoded: false))")

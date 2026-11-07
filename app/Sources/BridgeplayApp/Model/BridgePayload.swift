@@ -13,7 +13,15 @@ enum BridgePayload {
         let bridgePaths: [String]
     }
 
-    static let entries: [Entry] = [
+    static let entries: [Entry] = allEntries.filter { entry in
+        #if arch(x86_64)
+        return entry.resource != "aarch64-unix-lsteamclient.so"
+        #else
+        return true
+        #endif
+    }
+
+    private static let allEntries: [Entry] = [
         Entry(resource: "steam.exe", bridgePaths: [
             "steam.exe",
         ]),

@@ -5,23 +5,24 @@
 #include "../feats/usershortcuts.h"
 #include "../util/ptr.h"
 #include "../util/log.h"
+#include "../util/arch.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <signal.h>
 #include <string.h>
 
 static void *orig_CCompatManager_Init = NULL;
-typedef void *(*fn_CCompatManager_Init)(void *self, void *arg1);
+typedef bool (*fn_CCompatManager_Init)(void *self, void *arg1);
 
 // A failed DobbyHook leaves the target patched with no original. Every hook
 // below gives up its feature on NULL rather than fault, for safety.
-static void *hook_CCompatManager_Init(void *self, void *arg1) {
+static bool hook_CCompatManager_Init(void *self, void *arg1) {
     fn_CCompatManager_Init orig = (fn_CCompatManager_Init)orig_CCompatManager_Init;
     if (!orig) {
         NP_ERR("hook_CCompatManager_Init: no original, cannot initialize the manager");
-        return NULL;
+        return false;
     }
-    void *ret = orig(self, arg1);
+    bool ret = orig(self, arg1);
 
     np_compat_force_enable(self);
 
@@ -106,7 +107,7 @@ static uint64_t hook_WindowsOnlyLookup(const void *map, const uint32_t *appid,
         return fallback ? *fallback : 0;
     }
     uint64_t found = orig(map, appid, fallback);
-    if ((uint32_t)found || !appid)
+    if ((uint8_t)found || !appid)
         return found;
     void *mgr = np_compat_manager();
     if (!np_compat_is_windows_only_table(mgr, map))
@@ -147,11 +148,18 @@ void np_hooks_compat_publish_originals(void) {
 // write path.
 static void instrument_oslist_override_gate(void *address, void *ctx_) {
     (void)address;
+#if NP_INTEL
+    np_x86_ctx_t *ctx = ctx_;
+    if (ctx->general.rax != 0) return;
+    ctx->general.rax = 1;
+    uint64_t tool = ctx->general.r12;
+#else
     np_arm64_ctx_t *ctx = (np_arm64_ctx_t *)ctx_;
     if (ctx->general.x[0] != 0)
         return;
     ctx->general.x[0] = 1;
     uint64_t tool = ctx->general.x[21];
+#endif
     uint32_t appid = (tool && np_plausible_ptr(tool))
                      ? *(uint32_t *)(tool + np_compat_tool_off(COMPAT_TOOL_APPID_OFF)) : 0;
     NP_LOG("instrument_oslist_override_gate: appid=%u install platform forced to tool from_oslist", appid);
@@ -167,9 +175,14 @@ static void instrument_oslist_override_gate(void *address, void *ctx_) {
 // directory.
 static void instrument_resolver_local_redirect(void *address, void *ctx_) {
     (void)address;
+#if NP_INTEL
+    np_x86_ctx_t *ctx = ctx_;
+    uint64_t tool = ctx->general.rax;
+#else
     np_arm64_ctx_t *ctx = (np_arm64_ctx_t *)ctx_;
 
     uint64_t tool = ctx->general.x[0];
+#endif
     if (!tool || !np_plausible_ptr(tool))
         return;
 
@@ -192,11 +205,11 @@ static void instrument_resolver_local_redirect(void *address, void *ctx_) {
 }
 
 static void *orig_TerminateProcessByPid = NULL;
-typedef int (*fn_TerminateProcessByPid)(int pid);
+typedef bool (*fn_TerminateProcessByPid)(int pid);
 
-static int hook_TerminateProcessByPid(int pid) {
+static bool hook_TerminateProcessByPid(int pid) {
     fn_TerminateProcessByPid orig = (fn_TerminateProcessByPid)orig_TerminateProcessByPid;
-    int ret = orig ? orig(pid) : 0;
+    bool ret = orig ? orig(pid) : false;
     if (!orig)
         NP_ERR("hook_TerminateProcessByPid: no original, signalling pid %d directly", pid);
     if (ret == 0 && pid > 0) {

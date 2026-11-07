@@ -218,6 +218,10 @@ int np_load_profile(const char *path, np_sigdb_t *out) {
         out->sigdb_version = v->valueint;
     out->steam_build = build_field(root, "steam_build");
     str_field(root, "steam_build_date", out->steam_build_date, sizeof(out->steam_build_date));
+    str_field(root, "arch", out->arch, sizeof(out->arch));
+    cJSON *uuids = cJSON_GetObjectItem(root, "module_uuids");
+    str_field(uuids, "steamclient.dylib", out->client_uuid, sizeof(out->client_uuid));
+    str_field(uuids, "steamui.dylib", out->ui_uuid, sizeof(out->ui_uuid));
 
     cJSON *arr = cJSON_GetObjectItem(root, "signatures");
     int total = (arr && cJSON_IsArray(arr)) ? cJSON_GetArraySize(arr) : 0;

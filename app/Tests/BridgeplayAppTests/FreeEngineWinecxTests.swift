@@ -23,7 +23,8 @@ struct FreeEngineWinecxTests {
         #expect(NtdllPatcher.patches(for: build).map(\.payloadResource).allSatisfy { $0.hasSuffix(id) })
         #expect(SupportedRunners.build(loaderSHA256: build.loaderSHA256)?.id == build.id)
         #expect(build.tools.count == 1)
-        #expect(build.tools.first?.display == "\(build.releaseVersion) (msync, D3DMetal)")
+        let graphics = SetupChecks.isAppleSilicon ? "D3DMetal" : "DXMT"
+        #expect(build.tools.first?.display == "\(build.releaseVersion) (msync, \(graphics))")
         #expect(build.tools.first?.flavor == .rosetta)
         #expect(release.bundleName == "\(build.releaseVersion).app")
     }
@@ -310,7 +311,8 @@ struct FreeEngineWinecxTests {
         #expect(FreeEngineStatus.capture(both).current.isEmpty)
         // Steam lists one tool per engine.
         let tools = SupportedRunners.tools(for: [winehqBuild, winecxBuild]).map(\.display)
-        #expect(Set(tools) == ["WineHQ 11.15 - Rosetta", "WineCX 11.17 (msync, D3DMetal)"])
+        let winecxDisplay = SetupChecks.isAppleSilicon ? "WineCX 11.17 (msync, D3DMetal)" : "WineCX 11.17 (msync, DXMT)"
+        #expect(Set(tools) == ["WineHQ 11.15 - Rosetta", winecxDisplay])
         // The 11.15 engine is judged by its own pins, not by 11.17's.
         let previousBuild = try #require(SupportedRunners.build(id: FreeEngineWinecx.previous.build))
         let previous = CrossOverInstall(bundle: URL(filePath: "/e/WineCX 11.15.app"), releaseVersion: nil,
@@ -673,18 +675,19 @@ struct FreeEngineWinecxTests {
         #expect(WinecxD3DMetal.isBuiltin(root.appending(path: "lib/wine/x86_64-windows/winemetal.dll")))
         #expect(try String(contentsOf: FreeEngineWinecx.msyncMarker(in: root), encoding: .utf8) == "\(release.build)\n")
 
-        // The fixture GPTK was linked as the builtins, with Wine's own set aside under their pins.
-        #expect(WinecxD3DMetal.isLinked(root: root))
+        // GPTK replaces the builtins only on Apple Silicon; Intel keeps Wine's own set.
+        #expect(WinecxD3DMetal.isLinked(root: root) == SetupChecks.isAppleSilicon)
         #expect(fm.fileExists(atPath: root.appending(path: "lib/external/README").path(percentEncoded: false)))
         for (name, hash) in release.d3dStock {
-            #expect(Digest.sha256IfPresent(root.appending(path: "\(WinecxD3DMetal.stockPath)/\(name)")) == hash)
+            let path = SetupChecks.isAppleSilicon ? WinecxD3DMetal.stockPath : "lib/wine/x86_64-windows"
+            #expect(Digest.sha256IfPresent(root.appending(path: "\(path)/\(name)")) == hash)
         }
 
         // A runner cloned from it carries the same links, and a rescan reaches both trees.
         let runners = base.appending(path: "runners")
         let cloned = try RunnerInstaller.clone(from: install, runners: runners)
         let runnerRoot = SupportPaths.clonedRoot(forBuild: cloned.id, runners: runners)
-        #expect(WinecxD3DMetal.isLinked(root: runnerRoot))
+        #expect(WinecxD3DMetal.isLinked(root: runnerRoot) == SetupChecks.isAppleSilicon)
         #expect(FreeEngineWinecx.layoutProblems(root: runnerRoot, release: release).isEmpty)
         try fm.removeItem(at: gptk)
         #expect(SystemStatus.relinkGameportingToolkit(engines: engines, runners: runners, roots: [gptk]) == nil)
@@ -698,8 +701,18 @@ struct FreeEngineWinecxTests {
         }
         let again = try makePayload(in: base.appending(path: "gptk2"))
         #expect(SystemStatus.relinkGameportingToolkit(engines: engines, runners: runners, roots: [again])
-            == again.standardizedFileURL.path(percentEncoded: false))
-        #expect(WinecxD3DMetal.isLinked(root: root) && WinecxD3DMetal.isLinked(root: runnerRoot))
+            == (SetupChecks.isAppleSilicon ? again.standardizedFileURL.path(percentEncoded: false) : nil))
+        for tree in [root, runnerRoot] {
+            #expect(WinecxD3DMetal.isLinked(root: tree) == SetupChecks.isAppleSilicon)
+        }
+        if !SetupChecks.isAppleSilicon {
+            let payload = try #require(WinecxD3DMetal.locate(in: [again]))
+            try WinecxD3DMetal.link(payload, root: runnerRoot, stock: release.d3dStock)
+            #expect(WinecxD3DMetal.isLinked(root: runnerRoot))
+            #expect(WinecxD3DMetal.refresh(root: runnerRoot, roots: [again]) == nil)
+            #expect(!WinecxD3DMetal.isLinked(root: runnerRoot))
+            #expect(FreeEngineWinecx.layoutProblems(root: runnerRoot, release: release).isEmpty)
+        }
     }
 
     // MARK: - Against the user's own Game Porting Toolkit

@@ -3,6 +3,10 @@
 #include "../core/macho.h"
 #include "../resolver/anchor.h"
 #include "../util/a64.h"
+#include "../util/arch.h"
+#if NP_INTEL
+#include "../util/x86.h"
+#endif
 #include "../util/log.h"
 #include "../util/ptr.h"
 
@@ -51,6 +55,27 @@ static _Atomic uintptr_t g_scan_missed;  // CUser the last scan came up empty on
 
 // Whether a shortcut belongs to Steam Remote Play is the first field the
 // "shortcut changed" event at the end of SetShortcutExe reads.
+#if NP_INTEL
+static int probe_remote(uintptr_t notify, uint32_t *off) {
+    uintptr_t end = notify + NOTIFY_SPAN;
+    for (uintptr_t pc = notify; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) return 0;
+        // CMP qword [RSI + displacement], 0 in the notification builder.
+        if (insn.primary_opcode == 0x83 && (insn.rex & 8) &&
+            insn.modrm.reg == 7 && insn.modrm.mode != 3 &&
+            insn.operands[1].mem.base == 6 && insn.immediate == 0 &&
+            !(insn.flags & (X86_INSN_DECODE_FLAG_HAS_INDEX |
+                            X86_INSN_DECODE_FLAG_IP_RELATIVE))) {
+            *off = insn.operands[1].mem.disp;
+            return 1;
+        }
+        if (insn.primary_opcode == 0xc3) break;
+        pc += insn.length;
+    }
+    return 0;
+}
+#else
 static int probe_remote(uintptr_t notify, uint32_t *off) {
     for (uintptr_t pc = notify; pc < notify + NOTIFY_SPAN; pc += 4) {
         uint32_t rn, rt;
@@ -58,15 +83,85 @@ static int probe_remote(uintptr_t notify, uint32_t *off) {
     }
     return 0;
 }
+#endif
 
 static int probe_layout(uintptr_t set_shortcut_exe, uintptr_t text, size_t text_sz) {
     if (!set_shortcut_exe) return 0;
 
     layout_t l = {0};
-    uint32_t nodes_reg = NO_REG, node_reg = NO_REG, value_reg = NO_REG;
     int have_root = 0, have_key = 0, have_exe = 0;
     uintptr_t last_bl = 0, notify = 0;
 
+#if NP_INTEL
+    if (text_sz < NOTIFY_SPAN || set_shortcut_exe < text ||
+        set_shortcut_exe - text >= text_sz) return 0;
+    uintptr_t end = text + text_sz;
+    if (end - set_shortcut_exe > PROBE_SPAN) end = set_shortcut_exe + PROBE_SPAN;
+    uint32_t self_reg = NO_REG, root_reg = NO_REG;
+    uint32_t nodes_reg = NO_REG, value_reg = NO_REG;
+    int notify_args = 0;
+    for (uintptr_t pc = set_shortcut_exe; pc < end;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, end, &insn)) break;
+        uint32_t reg = insn.operands[0].reg;
+        uint32_t base = insn.operands[1].mem.base;
+        uint32_t off = insn.operands[1].mem.disp;
+        int wide = (insn.rex & 8) != 0;
+        int indexed = (insn.flags & X86_INSN_DECODE_FLAG_HAS_INDEX) != 0;
+        int memory = insn.modrm.mode != 3 &&
+                     (insn.flags & X86_INSN_DECODE_FLAG_HAS_BASE) &&
+                     !(insn.flags & X86_INSN_DECODE_FLAG_IP_RELATIVE);
+
+        if (insn.primary_opcode == 0x89 && insn.modrm.mode == 3 && wide) {
+            uint32_t dst = insn.operands[1].reg;
+            if (!have_root && reg == 7 && dst >= 8) self_reg = dst;
+            if (have_exe && dst == 6 && reg == value_reg) notify_args = 1;
+        } else if (!have_root && insn.primary_opcode == 0x8b && memory &&
+                   !wide && !indexed && base == 7) {
+            l.root = off;
+            root_reg = reg;
+            have_root = 1;
+        } else if (nodes_reg == NO_REG && insn.primary_opcode == 0x8b &&
+                   memory && wide && !indexed && base == self_reg) {
+            l.nodes = off;
+            nodes_reg = reg;
+        } else if (insn.primary_opcode == 0xc1 && insn.modrm.mode == 3 &&
+                   insn.modrm.reg == 4 && wide &&
+                   insn.operands[1].reg == root_reg && insn.immediate > 0 &&
+                   insn.immediate < 7) {
+            l.stride = 1u << insn.immediate;
+        } else if (!have_key && insn.primary_opcode == 0x39 && memory &&
+                   !wide && indexed && base == nodes_reg &&
+                   insn.operands[1].mem.index == root_reg &&
+                   insn.operands[1].mem.scale == 1) {
+            l.key = off;
+            have_key = 1;
+        } else if (have_key && value_reg == NO_REG &&
+                   insn.primary_opcode == 0x8b && memory && wide && indexed &&
+                   base == nodes_reg && insn.operands[1].mem.index == root_reg &&
+                   insn.operands[1].mem.scale == 1) {
+            l.value = off;
+            value_reg = reg;
+        } else if (value_reg != NO_REG && !have_exe &&
+                   insn.primary_opcode == 0x8d && memory && wide && !indexed &&
+                   reg == 7 && base == value_reg) {
+            l.exe = off;
+            have_exe = 1;
+        } else if (have_exe && insn.primary_opcode == 0xe8) {
+            last_bl = notify_args ? np_x86_call(pc, &insn) : 0;
+            notify_args = 0;
+        } else if (have_exe && insn.primary_opcode >= 0xb0 &&
+                   insn.primary_opcode <= 0xb7 && insn.immediate == 1 &&
+                   (uint32_t)((insn.primary_opcode - 0xb0) |
+                              ((insn.rex & 1) << 3)) == self_reg) {
+            notify = last_bl;
+            break;
+        }
+        if (insn.primary_opcode == 0xc3) break;
+        pc += insn.length;
+    }
+#else
+    uint32_t nodes_reg = NO_REG, node_reg = NO_REG, value_reg = NO_REG;
     for (uintptr_t pc = set_shortcut_exe; pc < set_shortcut_exe + PROBE_SPAN; pc += 4) {
         uint32_t w = *(const uint32_t *)pc, rd, rn, rt, imm;
 
@@ -99,6 +194,7 @@ static int probe_layout(uintptr_t set_shortcut_exe, uintptr_t text, size_t text_
             a64_bl(pc, w, &last_bl);
         }
     }
+#endif
 
     if (notify < text || notify + NOTIFY_SPAN > text + text_sz)
         notify = 0;
@@ -108,12 +204,12 @@ static int probe_layout(uintptr_t set_shortcut_exe, uintptr_t text, size_t text_
                 have_root, have_key, have_exe, (unsigned long)notify);
         return 0;
     }
-    if (l.stride < 16 || l.stride > 64 || l.key + 4 > l.stride || l.value + 8 > l.stride) {
+    if (l.stride < 16 || l.stride > 64 || l.key > l.stride - 4 || l.value > l.stride - 8) {
         NP_ERR("np_usershortcuts_bind: node stride %u key 0x%x value 0x%x do not fit "
                "a tree node", l.stride, l.key, l.value);
         return 0;
     }
-    if (l.exe + 8 > SHORTCUT_SPAN || l.remote + 8 > SHORTCUT_SPAN) {
+    if (l.exe > SHORTCUT_SPAN - 8 || l.remote > SHORTCUT_SPAN - 8) {
         NP_ERR("np_usershortcuts_bind: exe 0x%x remote 0x%x lie past a shortcut",
                l.exe, l.remote);
         return 0;

@@ -45,6 +45,7 @@ final class SetupAssistant {
     // Set when the password window was closed; the Rosetta row says so in place of an error.
     var rosettaNote: String?
     let appleSilicon = SetupChecks.isAppleSilicon
+    let nativeIntegrationAvailable = SetupChecks.nativeIntegrationAvailable
     let macOSSupported = SetupChecks.macOSVersion.majorVersion >= SetupChecks.minimumMacOS
     let freeBytes = SetupChecks.freeBytes()
 
@@ -93,9 +94,9 @@ final class SetupAssistant {
 
     init(preview: Preview? = nil, startAt start: Step = .mac) {
         isPreview = preview != nil
-        let located = preview == .fresh ? nil : WinecxD3DMetal.locate()
+        let located = preview == .fresh || !SetupChecks.isAppleSilicon ? nil : WinecxD3DMetal.locate()
         gptk = located
-        gptkImages = preview == .fresh ? [] : GPTKImport.candidatesIfMissing(installed: located != nil)
+        gptkImages = preview == .fresh || !SetupChecks.isAppleSilicon ? [] : GPTKImport.candidatesIfMissing(installed: located != nil)
         if preview == .fresh {
             rosettaInstalled = false
             signedIn = false
@@ -152,7 +153,7 @@ final class SetupAssistant {
         meter.clear()
     }
 
-    var macReady: Bool { appleSilicon && macOSSupported && rosettaInstalled && hasSpace }
+    var macReady: Bool { nativeIntegrationAvailable && macOSSupported && (!appleSilicon || rosettaInstalled) && hasSpace }
     var hasSpace: Bool { (freeBytes ?? .max) >= SetupChecks.requiredBytes }
 
     static func shouldShow(_ snapshot: StatusSnapshot?, defaults: UserDefaults = .standard) -> Bool {

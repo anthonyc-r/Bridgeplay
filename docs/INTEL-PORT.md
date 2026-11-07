@@ -1,63 +1,108 @@
-# Intel macOS port status
+# Intel macOS port
 
-The Swift app compiles for x86_64 with Xcode 26.6 / Swift 6.3.3 after the compiler
-compatibility fixes in this fork. This is a development build, not a working Intel
-Steam integration. The complete app payload and an Intel game launch are not yet
-validated. Keep the existing Apple Silicon installation requirement until the
-native integration works.
+This fork builds a native x86_64 Bridgeplay app and Steam plugin for Intel Macs running
+macOS 26. The Intel plugin now implements the compatibility, Steam web interface and
+shortcut hooks; it no longer uses the empty Intel slice from the Apple Silicon build.
 
-## Build the app code
+The development machine is an Intel iMac with an AMD Radeon Pro 5700 XT, macOS 26.6.2
+and Xcode 26.6 / Swift 6.3.3. The WineCX engine runs x86 Windows code directly. DXMT is
+the default DirectX 10/11 renderer; Rosetta, FEX and Apple's D3DMetal are not offered on
+Intel. The generic WineCX graphics refresh restores Wine's own files if an Intel engine
+still has D3DMetal linked.
+
+## Steam compatibility
+
+The Intel signature profile supports Steam build `1792618285`, with the exact
+`steamclient.dylib` and `steamui.dylib` UUIDs recorded in
+`signatures/macos.x86_64/1792618285.json`. Matching byte patterns alone do not enable
+hooks in a different Steam binary. A Steam update needs a new validated profile.
+
+The x86 instruction scanners use a bounded HDE64 decoder and fail safely on unsupported
+instructions. The original ARM instruction fixtures remain tested separately. Intel
+fixtures exercise register decoding, shortcut object offsets and signature UUID checks.
+The live preflight runs in its own process and does not patch the running Steam client.
+
+## Build
+
+The Makefile defaults to the host architecture. On this Intel Mac:
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-swift build --package-path app
-swift build --package-path app -c release
+make dobby
+make -j12 all overlay-shim iconmaker appinfo
+make -j12 bridge
+make fonts
+make app
+out/Bridgeplay.app/Contents/MacOS/BridgeplayApp --check-components
 ```
 
-These commands compile the Swift executables. They do not build the Steam plugin,
-Wine bridge, fonts or a distributable app bundle. `scripts/build-local.sh` still
-targets Apple Silicon and the full build documented in `BUILD-LOCAL.md`.
+`make app` produces `out/Bridgeplay.app`. The package includes compiled Italian,
+Russian and Simplified Chinese localizations with English source fallback. It supports
+both Xcode 26's flat SwiftPM bundles and Xcode 27's bundle layout and resolves resources
+inside the installed app without depending on the build checkout. Xcode 26 uses the
+same bridge artwork as a static icon.
 
-The fixes name the pointer captured by `defer`, give the nested runner mapping an
-explicit result type, and omit toolbar visibility priority when building with the
-older Swift compiler shipped in Xcode 26. The ordinary toolbar remains present.
-The newer compiler retains the existing toolbar behavior.
+The local development build reused fonts from an upstream release with an identical
+font source tree; the archive hash and provenance are in [BUILD-LOCAL.md](BUILD-LOCAL.md).
+The upstream automatic app update feed is disabled in Intel builds because its releases
+contain the Apple Silicon app. The upstream download bootstrap remains Apple Silicon
+only; use the built Intel app directly.
 
-## Native Steam integration still needed
+## Validation
 
-1. **Intel hook library.** `dylib/stub_x86_64.c` is deliberately empty. The Makefile
-   builds the actual plugin and Dobby for arm64, then adds this empty Intel slice.
-   A universal dylib therefore does not imply Intel functionality.
-2. **Intel Steam signatures.** The repository only supplies
-   `signatures/macos.arm64`. The installed Steam client has an x86_64 slice, but
-   its private compatibility functions are not exported by name. Each required
-   hook needs a validated Intel signature for the Steam build being tested.
-3. **Instruction decoding and register handling.** `resolver/anchor.c`,
-   `resolver/resolver.c`, `resolver/aob.c` and parts of `feats/compat.c` decode ARM
-   instructions or assume four-byte instruction alignment. The prehooks in
-   `hooks/hook_compat.c` read and write Dobby's ARM register context. These must
-   be ported together; changing `ARCH` alone would produce incorrect behavior.
-4. **Runtime and packaging.** Helpers, payload selection and setup currently
-   assume Apple Silicon. The Intel Wine bridge and a graphics backend suitable
-   for the actual GPU need end-to-end validation before setup can offer them.
+Completed on the Intel development machine:
 
-The first runtime milestone is a read-only resolver check against Intel Steam:
-every required signature must resolve uniquely, with verified function boundaries,
-register use and object offsets. Do not install hooks using ARM signatures or guessed
-addresses. After that, validate tool registration, Windows depot installation,
-game startup, Steam API bridging and clean game/Steam shutdown.
+- All 21 native Steam signature matches resolve uniquely under the expected module UUIDs.
+- Isolated native preflight resolves compatibility-manager and web UI object layouts,
+  registers a native WebUI route, installs the client and Steam UI hooks, and executes the
+  hooked shortcut-extension function.
+- Intel shortcut fixtures and read-only live binding checks pass, including backward
+  relative calls and instruction-decoder bounds checks.
+- Executable Dobby regression tests cover taken and untaken forward/backward Intel
+  conditional branches. The pinned dependency patch fixes the near-branch relocation
+  failure found during real Steam startup.
+- WineCX 4.7.3 starts a Windows command process natively.
+- Both 64-bit and 32-bit DXMT Direct3D 11 rendering tests render and read back the expected
+  pixels on the iMac's AMD GPU.
+- A real Windows Steam API client connects to the running native Mac Steam client and
+  observes its logged-in session through the freshly built bridge.
+- The Swift release build and all 1,000 tests in 100 suites pass. Localization checking
+  passes all 808 app strings and 68 bootstrap strings. Installer fixture tests retain
+  the production hardware guard while testing filesystem operations on either host.
 
-## Validation on the Intel development machine
+The end-to-end Chained Together test on 2026-11-07 launched through native Mac Steam
+with DirectX 11 and DXMT. It reached the menu after several minutes, then the desktop
+froze and the user reported a restart. This configuration is not stable or validated
+for play.
 
-On macOS 26.6.2 with Xcode 26.6:
+The first GPU reset report, at 10:21:37, identifies the game's pending Metal compute
+command buffer and records a GPU read protection fault at address zero in the game's
+GPU address space. Twenty reset reports span 10:21:37–10:23:19. WindowServer's
+main thread was blocked on the AMD graphics driver, and its watchdog reported 80
+seconds without a successful check-in. Thermal pressure was nominal. These reports
+connect the desktop freeze to the game's graphics workload, but do not identify the
+specific shader or distinguish a DXMT defect from a Metal/AMD driver defect. A lower
+resolution or frame-rate cap alone is not an established fix.
 
-- Swift debug app and test executables compile for x86_64.
-- Existing runner preparation, removal, cloning, detection, source selection and
-  tool ordering tests pass, including the resolved-symlink process checks.
-- `make -s cicheck envcheck buildcheck settingscheck routecheck bridgecheck` passes
-  (`cicheck`: 281 assertions).
-- The complete `make app-tests` run executes 998 tests and reports 104 issues.
-  Observed failures include the explicit Apple Silicon installer requirement,
-  missing staged payload/helpers, missing compiled localizations and signing of
-  test fixtures. It is not a passing full-suite result.
-- No plugin was deployed into Steam and no Windows game was launched through it.
+The next graphics alternative to evaluate is DXVK through MoltenVK; it has not yet
+passed an end-to-end game test on this machine. The passing component tests above do
+not establish game stability, save handling or multiplayer behavior.
+
+For that manual follow-up, a user override in
+`~/Library/Application Support/bridgeplay/gamefixes/2567870.conf` selects a 720p window
+and caps the frame rate. Keep selecting **DirectX 11** in Steam's launch dialog; choosing
+DirectX 12 would conflict with these arguments. This is a diagnostic configuration,
+not a validated shipped game fix:
+
+```ini
+BACKEND=dxvk
+ARGS=-d3d11 -windowed -ResX=1280 -ResY=720
+DXVK_FRAME_RATE=30
+DXVK_ASYNC=0
+```
+
+A selection-only preflight against the installed launcher accepts all four keys and
+selects DXVK over the prefix's previous DXMT record. It does not launch Wine or the game.
+Windowed mode keeps the game from filling the display; it cannot contain a GPU-driver
+hang. DXMT lists this GPU's Intel support as
+[experimental](https://github.com/3Shain/dxmt/wiki/Device-System-Runtime-Specifications).

@@ -77,7 +77,7 @@ enum GameDefaults {
 
         var kind: Kind {
             switch self {
-            case .backend: .choice(["dxmt", "dxvk", "wined3d", "d3dmetal"])
+            case .backend: .choice(SetupChecks.isAppleSilicon ? ["dxmt", "dxvk", "wined3d", "d3dmetal"] : ["dxmt", "dxvk", "wined3d"])
             case .msync: .choice(["1", "0"])
             case .frameGen: .choice(["0", "2", "3", "adaptive"])
             case .frameGenQuality: .choice(["performance", "balanced", "quality"])

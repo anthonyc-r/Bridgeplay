@@ -4,6 +4,10 @@
 #include "../util/file.h"
 #include "../util/a64.h"
 #include "../util/ptr.h"
+#include "../util/arch.h"
+#if NP_INTEL
+#include "../util/x86.h"
+#endif
 
 #include <dirent.h>
 #include <dlfcn.h>
@@ -95,6 +99,7 @@ static int ensure_dir(const char *path) {
 
 static int32_t g_tool_shift;
 
+#if !NP_INTEL
 // LDR Wt,[X0,#imm]. Writes the byte offset and destination register.
 static int ldr32_from_x0(uint32_t w, uint32_t *off, uint32_t *rt) {
     if ((w & 0xFFC003E0u) != 0xB9400000u) return 0;
@@ -167,8 +172,32 @@ static int probe_oslist_offsets(uintptr_t oslist_gate, uint32_t base,
     *from_off = seen[0] > seen[1] ? seen[1] : seen[0];
     return 2;
 }
+#endif
 
 int np_compat_probe_tool_layout(uintptr_t appid_gate, uintptr_t oslist_gate) {
+#if NP_INTEL
+    if (!appid_gate || !oslist_gate) return 0;
+    const uint8_t *gate = (const void *)appid_gate;
+    // MOV ESI,[RAX+disp8]; TEST ESI,ESI; JE rel32.
+    if (memcmp(gate, "\x8b\x70", 2) || memcmp(gate + 3, "\x85\xf6\x0f\x84", 4)) return 0;
+    int32_t branch;
+    memcpy(&branch, gate + 7, sizeof(branch));
+    uintptr_t local = appid_gate + 11 + branch;
+    if (local <= appid_gate || local > appid_gate + 0x400) return 0;
+    const uint8_t *load = (const void *)local;
+    if (memcmp(load, "\x48\x8b\x40", 3)) return 0;
+    int32_t shift = (int32_t)gate[2] - COMPAT_TOOL_APPID_OFF;
+    if (shift != (int32_t)load[3] - COMPAT_TOOL_INSTALL_OFF) return 0;
+    // The pinned Intel gate compares to_oslist through R12 immediately before the call.
+    const uint8_t *os = (const void *)oslist_gate;
+    if (memcmp(os, "\x48\x85\xc0", 3) || memcmp(os - 30, "\x49\x8b\xb4\x24", 4)) return 0;
+    uint32_t to;
+    memcpy(&to, os - 26, sizeof(to));
+    if ((int32_t)to - COMPAT_TOOL_TO_OSLIST_OFF != shift) return 0;
+    g_tool_shift = shift;
+    NP_LOG("np_compat_probe_tool_layout: Intel tool shift %+d, appid 0x%x, install 0x%x", shift, gate[2], load[3]);
+    return 1;
+#else
     if (!appid_gate) return 0;
 
     uint32_t appid_off, rt;
@@ -229,6 +258,7 @@ int np_compat_probe_tool_layout(uintptr_t appid_gate, uintptr_t oslist_gate) {
                "%+d from the baseline (appid 0x%x, install 0x%x)",
                g_tool_shift, appid_off, install_off);
     return 1;
+#endif
 }
 
 // The manager is a much larger object than a tool entry and grows in the middle,
@@ -239,6 +269,26 @@ int np_compat_probe_tool_layout(uintptr_t appid_gate, uintptr_t oslist_gate) {
 static uint32_t g_enabled_off = COMPAT_MANAGER_ENABLED_OFF;
 
 int np_compat_probe_enabled_off(uintptr_t bis_enabled) {
+#if NP_INTEL
+    if (!bis_enabled) return 0;
+    int parked = 0;
+    for (uintptr_t pc = bis_enabled; pc < bis_enabled + 0x80;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, bis_enabled + 0x80, &insn)) return 0;
+        if (insn.primary_opcode == 0x89 && insn.modrm.mode == 3 &&
+            insn.operands[0].reg == 7 && insn.operands[1].reg == 3) parked = 1;
+        if (parked && insn.primary_opcode == 0x80 && insn.modrm.reg == 7 &&
+            insn.modrm.mode == 2 && insn.operands[1].mem.base == 3 && insn.immediate == 1) {
+            uint32_t off = insn.operands[1].mem.disp;
+            if (off < 0x100 || off > 0x10000) return 0;
+            g_enabled_off = off;
+            NP_LOG("np_compat_probe_enabled_off: Intel enabled flag at 0x%x", off);
+            return 1;
+        }
+        pc += insn.length;
+    }
+    return 0;
+#else
     if (!bis_enabled) return 0;
 
     // this arrives in X0 and is parked in a callee-saved register before the
@@ -280,6 +330,7 @@ int np_compat_probe_enabled_off(uintptr_t bis_enabled) {
                "baseline", off, (int32_t)off - COMPAT_MANAGER_ENABLED_OFF);
     g_enabled_off = off;
     return 1;
+#endif
 }
 
 uint32_t np_compat_enabled_off(void) {
@@ -289,6 +340,27 @@ uint32_t np_compat_enabled_off(void) {
 static uint32_t g_windows_only_off;
 
 int np_compat_probe_windows_only_off(uintptr_t get_wildcard_mapping, uintptr_t lookup) {
+#if NP_INTEL
+    if (!get_wildcard_mapping || !lookup) return 0;
+    uint32_t offset = 0;
+    for (uintptr_t pc = get_wildcard_mapping; pc < get_wildcard_mapping + 0x100;) {
+        x86_insn_decode_t insn;
+        if (!np_x86_decode(pc, get_wildcard_mapping + 0x100, &insn)) return 0;
+        if (insn.primary_opcode == 0x8d && insn.operands[0].reg == 7 &&
+            (insn.flags & X86_INSN_DECODE_FLAG_HAS_BASE) && insn.operands[1].mem.base == 15)
+            offset = insn.operands[1].mem.disp;
+        uintptr_t called = np_x86_call(pc, &insn);
+        if (called == lookup) {
+            if (offset < 0x100 || offset > 0x10000) return 0;
+            g_windows_only_off = offset;
+            NP_LOG("np_compat_probe_windows_only_off: Intel table at 0x%x", offset);
+            return 1;
+        }
+        if (called) offset = 0;
+        pc += insn.length;
+    }
+    return 0;
+#else
     if (!get_wildcard_mapping || !lookup) return 0;
 
     // The offset only exists in the code. Right before calling the lookup,
@@ -312,6 +384,7 @@ int np_compat_probe_windows_only_off(uintptr_t get_wildcard_mapping, uintptr_t l
     NP_WARN("np_compat_probe_windows_only_off: no table argument for 0x%lx in 0x%lx",
             (unsigned long)lookup, (unsigned long)get_wildcard_mapping);
     return 0;
+#endif
 }
 
 bool np_compat_is_windows_only_table(const void *compat_mgr, const void *map) {

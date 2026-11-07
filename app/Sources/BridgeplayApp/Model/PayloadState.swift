@@ -87,6 +87,9 @@ enum PayloadInspector {
     }
 
     private static func expand(_ entry: PayloadEntry, for builds: [RunnerBuild]) -> [PayloadEntry] {
+        #if arch(x86_64)
+        if entry.origin == .built && entry.path == "aarch64-unix/lsteamclient.so" { return [] }
+        #endif
         guard entry.origin == .patched,
               let arch = WineArch.allCases.first(where: {
                   entry.path == "wine/\($0.rawValue)/ntdll.dll"

@@ -82,7 +82,7 @@ void np_hooks_shortcut_bundle_bind(const struct mach_header_64 *steamui) {
 static uint64_t np_shortcut_create(void *app, uint64_t desktop, uint64_t unused) {
     if (!g_create_orig) return 0;
     uint64_t ret = g_create_orig(app, desktop, unused);
-    if (!ret || !app || *(const uint32_t *)((const char *)app + NP_APP_KIND_OFF) == NP_APP_KIND_DLC)
+    if (!(uint8_t)ret || !app || *(const uint32_t *)((const char *)app + NP_APP_KIND_OFF) == NP_APP_KIND_DLC)
         return ret;
 
     // Vtable slot 0 returns the app ID. Steam writes run.sh with %d, so an ID past

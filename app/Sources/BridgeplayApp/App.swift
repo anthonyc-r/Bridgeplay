@@ -71,6 +71,7 @@ struct BridgeplayApp: App {
         CommandGroup(replacing: .appInfo) {
             Button("About Bridgeplay") { AboutPanel.show() }
             Button("Check for Updates…") { updater.check() }
+                .disabled(!AppUpdater.updatesEnabled)
         }
 
         CommandGroup(after: .sidebar) {

@@ -2366,28 +2366,6 @@
         }
       }
     },
-    "Apple silicon" : {
-      "localizations" : {
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple silicon"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple silicon"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple 芯片"
-          }
-        }
-      }
-    },
     "Apple's Game Porting Toolkit (D3DMetal) runs DirectX 11 and 12 games on Metal. Bridgeplay can download it for you under Apple's non-commercial license, or add your own copy from Apple." : {
       "localizations" : {
         "it" : {
@@ -3443,28 +3421,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bridgeplay 无法识别此值。"
-          }
-        }
-      }
-    },
-    "Bridgeplay doesn't run on Intel Macs." : {
-      "localizations" : {
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bridgeplay non funziona sui Mac Intel."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bridgeplay не работает на компьютерах Mac с Intel."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bridgeplay 无法在 Intel 版 Mac 上运行。"
           }
         }
       }
@@ -5540,6 +5496,28 @@
         }
       }
     },
+    "DXMT runs DirectX 10 and 11 games on Metal. It is included with the WineCX engine." : {
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DXMT esegue i giochi DirectX 10 e 11 su Metal. È incluso nel motore WineCX."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DXMT запускает игры DirectX 10 и 11 через Metal. Он входит в состав движка WineCX."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DXMT 通过 Metal 运行 DirectX 10 和 11 游戏。它已包含在 WineCX 引擎中。"
+          }
+        }
+      }
+    },
     "Default Compatibility Tool" : {
       "localizations" : {
         "it" : {
@@ -7538,6 +7516,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "图形后端"
+          }
+        }
+      }
+    },
+    "Graphics for your Mac" : {
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grafica per il tuo Mac"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Графика для вашего Mac"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于你的 Mac 的图形"
           }
         }
       }
@@ -10600,6 +10600,28 @@
         }
       }
     },
+    "Processor" : {
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Processore"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Процессор"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理器"
+          }
+        }
+      }
+    },
     "Properties…" : {
       "localizations" : {
         "it" : {
@@ -10926,6 +10948,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自 %@ 起已就绪。"
+          }
+        }
+      }
+    },
+    "Ready to install with WineCX." : {
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pronto per essere installato con WineCX."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Готов к установке вместе с WineCX."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已准备好随 WineCX 一起安装。"
           }
         }
       }
@@ -15593,6 +15637,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此应用包含适用于 Steam 的更新文件。"
+          }
+        }
+      }
+    },
+    "This build does not include Intel Steam support." : {
+      "localizations" : {
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Questa versione non include il supporto Steam per Intel."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Эта сборка не включает поддержку Steam на Intel."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本不包含 Intel Mac 的 Steam 支持。"
           }
         }
       }

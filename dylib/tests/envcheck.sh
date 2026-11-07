@@ -66,6 +66,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 np_support="$work/Application Support/bridgeplay"
 np_build="test"
+np_host_arch=arm64
 library="$np_support/runners/crossover-$np_build/CrossOver/lib64/apple_gptk/external/libd3dshared.dylib"
 init=$(sed -n '/^CX_ROOT=/,/^wine_unix=/p' "$SRC")
 # shellcheck disable=SC2016 # Match the literal launcher loop.
@@ -86,6 +87,19 @@ for arg in "$@"; do
   case "$arg" in CX_APPLEGPTK_LIBD3DSHARED_PATH=*) forwarded=${arg#*=} ;; esac
 done
 is "game launcher receives the path as one argument" "$library" "$forwarded"
+unset CX_APPLEGPTK_LIBD3DSHARED_PATH
+np_host_arch=x86_64
+eval "$init"
+is "Intel does not initialize Apple's Rosetta library" "" "${CX_APPLEGPTK_LIBD3DSHARED_PATH:-}"
+mkdir -p "$CX_ROOT/lib/notproton-backends"
+touch "$CX_ROOT/lib/notproton-backends/d3dmetal.enabled"
+linked_status=0
+# shellcheck disable=SC2016 # The child shell evaluates the captured launcher block.
+env np_support="$np_support" np_build="$np_build" np_host_arch=x86_64 init="$init" \
+  sh -c 'eval "$init"' > "$work/linked.out" 2>&1 || linked_status=$?
+is "Intel refuses an imported runner with Apple graphics still linked" 1 "$linked_status"
+rm "$CX_ROOT/lib/notproton-backends/d3dmetal.enabled"
+np_host_arch=arm64
 # macOS sed stops at the first invalid UTF-8 value.
 # shellcheck disable=SC2016 # The stub and loop expand inside the child shell.
 after_bad=$(env -i PATH="$PATH" LANG=en_US.UTF-8 DXVK_HUD=1 sh -c '
@@ -168,6 +182,81 @@ for arg in "$@"; do
 done
 is "FEX settings reach the game" "FEX_MULTIBLOCK=0 FEX_X87REDUCEDPRECISION=0 " "$(printf %s "$fex_args" | sort | tr '\n' ' ')"
 unset -v FEX_X87REDUCEDPRECISION FEX_MULTIBLOCK
+
+echo "== Intel runs x86_64 Wine without ARM runtime settings =="
+np_host_arch=x86_64
+set_all
+export CX_APPLEGPTK_LIBD3DSHARED_PATH=/gptk/libd3dshared.dylib FEX_X87REDUCEDPRECISION=1
+wine_unix="/R R/lib/wine/x86_64-unix"
+eval "$drop"
+is "Intel keeps DXMT and drops D3DMetal and Rosetta" "DXMT_CONFIG " "$(seen)"
+is "Intel drops the GPTK library" unset "${CX_APPLEGPTK_LIBD3DSHARED_PATH-unset}"
+is "Intel drops FEX settings" unset "${FEX_X87REDUCEDPRECISION-unset}"
+is "the run log names ignored Intel-incompatible settings" \
+  "CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX ROSETTA_ADVERTISE_AVX CX_APPLEGPTK_LIBD3DSHARED_PATH FEX_X87REDUCEDPRECISION" "$np_dropped"
+loaders=$(sed -n '/^wine_unix=/,/^export WINELOADER WINESERVER$/p' "$SRC")
+CX_ROOT="$work/dual-runtime"
+mkdir -p "$CX_ROOT/lib/wine/aarch64-unix/wine.app/Contents/MacOS" "$CX_ROOT/bin"
+touch "$CX_ROOT/lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine" "$CX_ROOT/bin/wineserver-arm64" "$CX_ROOT/bin/wineserver"
+chmod +x "$CX_ROOT/lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine" "$CX_ROOT/bin/wineserver-arm64" "$CX_ROOT/bin/wineserver"
+np_flavor=fex
+eval "$loaders"
+is "Intel ignores an executable ARM loader" "$CX_ROOT/lib/wine/x86_64-unix/wine" "$WINELOADER"
+is "Intel uses the matching native server" "$CX_ROOT/bin/wineserver" "$WINESERVER"
+names_for_machine=$(sed -n '/^tool_name() {$/,/^}$/p' "$SRC")
+eval "$names_for_machine"
+is "Intel prefix messages name the native runtime" 'native Intel Wine' "$(tool_name 8664)"
+np_host_arch=arm64
+eval "$loaders"
+is "Apple Silicon retains its FEX loader" "$CX_ROOT/lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine" "$WINELOADER"
+is "Apple Silicon prefix messages retain Rosetta" Rosetta "$(tool_name 8664)"
+unset -v DXMT_CONFIG
+
+echo "== gamefix defaults cannot restore ARM settings on Intel =="
+gamefix_functions=""
+for name in gamefix_log valid_dll_overrides gamefix_reason gamefix_read gamefix_apply_env load_gamefixes; do
+  body=$(sed -n "/^$name() {\$/,/^}\$/p" "$SRC")
+  [ -n "$body" ] || { echo "FAIL: $name not found"; exit 1; }
+  gamefix_functions="$gamefix_functions
+$body"
+done
+conf_support="$work/gamefix-support"
+mkdir -p "$conf_support/gamefixes-default" "$conf_support/gamefixes"
+cp "$(dirname "$0")/../../gamefixes/default.conf" "$conf_support/gamefixes-default/default.conf"
+printf '%s\n' DXVK_FRAME_RATE=30 DXVK_ASYNC=0 > "$conf_support/gamefixes/4242.conf"
+# shellcheck disable=SC2016 # The child shell runs the launch-order fixture.
+conf_environment() {
+  env -i PATH="$PATH" np_host_arch="$1" wine_unix=/R/lib/wine/x86_64-unix \
+    np_support="$conf_support" app_id=4242 verb=waitforexitandrun log="$work/conf-$1.log" \
+    ROSETTA_ADVERTISE_AVX=0 D3DM_ENABLE_METALFX=0 \
+    drop="$drop" functions="$gamefix_functions" forward="$forward" sh -ec '
+      eval "$drop"
+      eval "$functions"
+      gamefix_keys=""
+      load_gamefixes
+      printf "%s|%s|%s|%s\n" "${ROSETTA_ADVERTISE_AVX-unset}" "${D3DM_ENABLE_METALFX-unset}" \
+        "$DXVK_FRAME_RATE" "$DXVK_ASYNC"
+      set --
+      eval "$forward"
+      for arg in "$@"; do
+        case "$arg" in ROSETTA_*|D3DM_*|DXVK_*) printf "%s\n" "$arg" ;; esac
+      done | LC_ALL=C sort
+    '
+}
+is "Intel conf loading and launcher forwarding keep only compatible settings" \
+  'unset|unset|30|0
+DXVK_ASYNC=0
+DXVK_FRAME_RATE=30' "$(conf_environment x86_64)"
+is "Apple Silicon retains launch-option precedence and forwarding" \
+  '0|0|30|0
+D3DM_ENABLE_METALFX=0
+DXVK_ASYNC=0
+DXVK_FRAME_RATE=30
+ROSETTA_ADVERTISE_AVX=0' "$(conf_environment arm64)"
+is "Intel logs the skipped Rosetta default" 1 \
+  "$(grep -c 'ROSETTA_ADVERTISE_AVX ignored on Intel, the shipped-global conf value is not applied' "$work/conf-x86_64.log" || true)"
+is "Intel logs the skipped D3DMetal default" 1 \
+  "$(grep -c 'D3DM_ENABLE_METALFX ignored on Intel, the shipped-global conf value is not applied' "$work/conf-x86_64.log" || true)"
 
 echo "== the support folder and the BRIDGEPLAY_ names =="
 # shellcheck disable=SC2016 # Match the literal assignment.

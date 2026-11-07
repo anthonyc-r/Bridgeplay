@@ -30,7 +30,10 @@ HOST_CC="${HOST_CC:-clang -arch x86_64}"
 HOST_CXX="${HOST_CXX:-clang++ -arch x86_64}"
 
 # The bison and autoconf macOS ships are too old for wine's configure.
-PATH="/opt/homebrew/bin:/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/autoconf/bin:$PATH"
+if command -v brew >/dev/null 2>&1; then
+    brew_prefix=$(brew --prefix)
+    PATH="$brew_prefix/opt/bison/bin:$brew_prefix/opt/flex/bin:$brew_prefix/opt/autoconf/bin:$brew_prefix/bin:$PATH"
+fi
 export PATH
 
 missing=""
