@@ -146,7 +146,11 @@ DXMT_CONFIG=d3d11.preferredMaxFrameRate=30
 ```
 
 The native Steam launch log confirms DXMT, the windowed 720p arguments and the 30 FPS
-configuration. The end-to-end gameplay result for this patched renderer is pending.
+configuration. The first patched launch reached the menu and entered a level, but only
+2D overlays rendered: the 3D scene was black. The log recorded seven geometry/mesh
+pipeline linkage failures (fragment input `user(reg0_0)` missing from vertex outputs).
+The game exited normally after 94 seconds, with no new GPU reset report. This separate
+rendering failure remains unresolved by the buffer patch.
 
 The probe source and reproduction instructions are in [bridge/tests](../bridge/tests/README.md).
 The passing component tests do not establish game stability, save handling or multiplayer

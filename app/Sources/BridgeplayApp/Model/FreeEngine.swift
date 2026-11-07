@@ -25,9 +25,9 @@ struct FreeEngineRelease: Sendable {
 // OpenGL 4.1, which tops out below feature level 11 and so fails any Unreal or
 // Unity game that needs it, and DXVK pays for a second translation through
 // MoltenVK. DXMT goes to Metal directly, the way D3DMetal does. Both free engines take
-// the same build: DXMT master e94c312 (https://github.com/3Shain/dxmt/tree/e94c312f5c054263acf261cfa109edf13e757587),
-// LGPL-2.1-or-later since ec357fd (v0.80 was the last MIT release), built by
-// scripts/build-dxmt.sh as docs/DXMT.md describes.
+// the same architecture-specific build. Intel uses the buffer-access fix in dxmt-patch/;
+// Apple Silicon retains the upstream e94c312 artifact. Both are LGPL-2.1-or-later;
+// source, build recipes and pins are in docs/DXMT.md.
 struct RendererRelease: Sendable {
     let name: String
     let archive: String
@@ -115,7 +115,7 @@ enum FreeEngine {
     // Shared by both free engines. Hosted on Bridgeplay's own release, since upstream
     // publishes no build of master; the per-file hashes are in docs/DXMT.md. d3d12.dll
     // (x86_64-windows-d3d12/ in the tarball) is the unfinished backend and is never staged.
-    static let dxmt = RendererRelease(
+    static let upstreamDxmt = RendererRelease(
         name: "DXMT e94c312",
         archive: "dxmt-e94c312.tar.gz",
         sha256: "8de0d5b7eb2b96315f6ec8e259c05423ab43212e776196147b30d9f44927f7f0",
@@ -143,6 +143,41 @@ enum FreeEngine {
             "i386-windows/dxgi.dll": "91f38df103412235793f84efe06b87f6f6fc3a4791d4f8d9f8cc2e16bc137d53",
         ]
     )
+
+    // The compiler guard fix has been validated on Intel Radeon. Keep the existing
+    // Apple Silicon artifact until that hardware has received equivalent testing.
+    static let intelDxmt = RendererRelease(
+        name: "DXMT e94c312 (Bridgeplay buffer guards)",
+        archive: "dxmt-e94c312-2898d5da398b-d3d11.tar.gz",
+        sha256: "b471850e25f268d83f8a3a944b041066077e5c92e8f4cd122cdee9fb517bc6c4",
+        bases: [URL(string: "https://raw.githubusercontent.com/anthonyc-r/Bridgeplay/720023bc6bfc1df6c7e54c2ee0a9c190106d122f/dxmt-patch/artifacts")!],
+        tree: "e94c312-2898d5da398b-d3d11",
+        files: [
+            "i386-windows/d3d10core.dll": "1452c23e06f25dadfff8ca479f448c10247aa5fca003f57a8ba5d15065ab53b2",
+            "i386-windows/d3d11.dll": "af8f1c0965f16da93873dc3ba7bcd5451d81cd1952b4d0a5678388200f7dfdf1",
+            "i386-windows/dxgi.dll": "d671ccc48ba42d9f88b47289789c051a4abef49e7d843c53f3ef875f821022c2",
+            "i386-windows/winemetal.dll": "257b2c3202685d5669c2c940e4fef124c87e0181ff09ba10c1ddd5ea88943e26",
+            "x86_64-unix/winemetal.so": "a924920d7f470bb4e938474cd1c516746e8120c1d2d5ba790f4d838840dd5315",
+            "x86_64-windows/d3d10core.dll": "39e8d5aa3afdfd7c56a036342eec6faa5eb6c449fa7fc02d3ee26f0262270018",
+            "x86_64-windows/d3d11.dll": "61a99890b7f9cfbdcde78e349badd7652c6701e1f4b0f9f3fa8786625cf21662",
+            "x86_64-windows/dxgi.dll": "cbb46eb8171a6effe5e302d72fc4aa54ab7299930bc39d7549ac680aa4330770",
+            "x86_64-windows/winemetal.dll": "7d8e566493397dce69f8f2032824099c4ff7e29f6e99260526e31f83295b3041",
+        ],
+        natives: [
+            "i386-windows/d3d10core.dll": "9e4e3586915f8165c623d336e157a57091fa3ddf4b1ee213829f93def875d3e4",
+            "i386-windows/d3d11.dll": "8a42693e7550b5ea8f140cbdd8aa92a3e2f500db9574ad73667020fd05cfa51f",
+            "i386-windows/dxgi.dll": "83ffb87140c846ae51a09ecbc2344b2d6fd2407482f38d42a366bcac8b2a1803",
+            "x86_64-windows/d3d10core.dll": "01b492c2c0184a6b1c2f9882970986c09bfeb9819afa432e88d0e2af4ccc4eac",
+            "x86_64-windows/d3d11.dll": "e3860d29e1be2f733c57d0b905c035c817dc551d3f5a79d8c395109c31dd2348",
+            "x86_64-windows/dxgi.dll": "0194397a393e3bc9f7d89cfe52a1c43ec8dc2d5ae8057f88ee5b71618b813f3d",
+        ]
+    )
+
+    #if arch(x86_64)
+    static let dxmt = intelDxmt
+    #else
+    static let dxmt = upstreamDxmt
+    #endif
 
     static let macDriverPath = "lib/wine/x86_64-unix/winemac.so"
 

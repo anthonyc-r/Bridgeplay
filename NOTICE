@@ -135,6 +135,29 @@ in app/Sources/BridgeplayApp/Model/FreeEngine.swift) when they are not there.
 
 The license texts of DXMT and DXVK ship next to these archives in the installer.
 
+Intel DXMT renderer distributed by this fork
+------------------------------------------
+
+dxmt-patch/artifacts/dxmt-e94c312-2898d5da398b-d3d11.tar.gz contains DXMT at
+e94c312f5c054263acf261cfa109edf13e757587 plus this fork's buffer access guards
+(dxmt-patch/buffer-bounds.patch), under LGPL-2.1-or-later. Copyright (c)
+2023-2026 Feifan He for CodeWeavers; upstream authorship is retained. The matching
+source archive beside it contains the exact patched sources, submodules, patch
+and build recipe. Both archives are available at immutable commit
+720023bc6bfc1df6c7e54c2ee0a9c190106d122f of
+https://github.com/anthonyc-r/Bridgeplay. See dxmt-patch/README.md for checksums.
+Apple Silicon continues to use the unchanged upstream renderer described above.
+
+The Intel renderer statically links LLVM 15.0.7, commit
+8dfdcc7b7bf66834a761bd8de445840ef68e4d1a of
+https://github.com/llvm/llvm-project, under Apache-2.0 with LLVM exceptions and
+the legacy University of Illinois/NCSA terms where applicable. The binary
+archive includes LLVM's full license, BLAKE3's CC0/Apache-2.0 terms, regex notices,
+and the additional xxHash, Unicode, MD5 and SHA attributions from LLVM Support.
+It also includes notices for Microsoft's MIT-licensed DXBC parser, DXVK's
+zlib-licensed utilities and the bundled MinGW-w64 DirectX headers. The matching
+source tree preserves their original notices.
+
 Not shipped in the installer: the WineCX runtime (Libraries.tar.gz from
 https://github.com/dappermint/winecx-gptk, pinned in
 app/Sources/BridgeplayApp/Model/FreeEngineWinecx.swift). Besides Wine it bundles
@@ -174,8 +197,10 @@ scripts/package-wine-patch-sources.sh:
 
 Likewise, every dxmt-<commit> release from here on carries a
 dxmt-<commit>-source.tar.gz beside the binaries (above; docs/DXMT.md). The DXMT
-commit currently pinned, e94c312, predates that and has no self-hosted source archive
-yet; its source is the upstream URL above until the next rebuild adds one.
+upstream artifact currently pinned on Apple Silicon, e94c312, predates that and
+has no self-hosted source archive yet; its source is the upstream URL above.
+The Intel patched artifact has its corresponding source archive beside the
+binaries in dxmt-patch/artifacts, as described above.
 
 Compatibility data
 ------------------

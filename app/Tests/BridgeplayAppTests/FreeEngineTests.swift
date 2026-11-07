@@ -218,9 +218,9 @@ struct FreeEngineTests {
         }
     }
 
-    @Test("DXMT is the pinned master build on Bridgeplay's release, shared by both free engines")
-    func dxmtPins() {
-        let dxmt = FreeEngine.current.renderer
+    @Test("Apple Silicon retains the pinned upstream DXMT release")
+    func upstreamDxmtPins() {
+        let dxmt = FreeEngine.upstreamDxmt
         #expect(dxmt.archive == "dxmt-e94c312.tar.gz")
         #expect(dxmt.sha256 == "8de0d5b7eb2b96315f6ec8e259c05423ab43212e776196147b30d9f44927f7f0")
         #expect(dxmt.tree == "e94c312")
@@ -240,8 +240,54 @@ struct FreeEngineTests {
         ])
         #expect(!dxmt.files.keys.contains { $0.contains("d3d12") || $0.contains("nv") })
         #expect(Set(dxmt.natives.keys) == Set(dxmt.files.keys.filter { !RendererRelease.isWinemetal($0) }))
-        #expect(FreeEngineWinecx.current.renderer.sha256 == dxmt.sha256)
-        #expect(FreeEngineWinecx.current.renderer.files == dxmt.files)
+    }
+
+    @Test("Both free engines select guarded DXMT on Intel and preserve upstream on Apple Silicon")
+    func dxmtArchitectureSelection() {
+        #if arch(x86_64)
+        let expected = FreeEngine.intelDxmt
+        #else
+        let expected = FreeEngine.upstreamDxmt
+        #endif
+        for selected in [FreeEngine.current.renderer, FreeEngineWinecx.current.renderer] {
+            #expect(selected.archive == expected.archive)
+            #expect(selected.sha256 == expected.sha256)
+            #expect(selected.files == expected.files)
+            #expect(selected.natives == expected.natives)
+        }
+        #expect(FreeEngine.intelDxmt.sha256 != FreeEngine.upstreamDxmt.sha256)
+        #expect(Set(FreeEngine.intelDxmt.files.keys) == Set(FreeEngine.upstreamDxmt.files.keys))
+        #expect(Set(FreeEngine.intelDxmt.natives.keys) == Set(FreeEngine.upstreamDxmt.natives.keys))
+    }
+
+    @Test("The committed Intel DXMT archive matches every shipped and installed pin")
+    func committedIntelDxmt() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let dxmt = FreeEngine.intelDxmt
+        let archive = repository.appending(path: "dxmt-patch/artifacts/\(dxmt.archive)")
+        #expect(Digest.sha256IfPresent(archive) == dxmt.sha256)
+        let work = try makeEngines()
+        defer { try? FileManager.default.removeItem(at: work) }
+        let result = try Shell.run("/usr/bin/tar", ["-xf", archive.path(percentEncoded: false), "-C", work.path(percentEncoded: false)])
+        try #require(result.status == 0)
+        let tree = work.appending(path: dxmt.tree)
+        for (path, hash) in dxmt.files {
+            #expect(Digest.sha256IfPresent(tree.appending(path: path)) == hash, "\(path)")
+        }
+        let root = work.appending(path: "root")
+        try FreeEngine.installRenderer(dxmt, from: tree, root: root, step: FreeEngine.step)
+        for path in dxmt.files.keys {
+            #expect(Digest.sha256IfPresent(root.appending(path: dxmt.installPath(of: path))) == dxmt.installedHash(of: path), "\(path)")
+        }
+        for name in ["COPYING.LIB", "LICENSE", "LICENSE-LLVM.txt", "LICENSE-LLVM-BLAKE3.txt",
+                     "LICENSE-LLVM-regex.txt", "LICENSE-LLVM-third-party.txt", "LICENSE-DXBCParser.txt"] {
+            #expect(FileManager.default.fileExists(atPath: tree.appending(path: name).path))
+        }
+        #expect(dxmt.bases.map(\.absoluteString) == [
+            "https://raw.githubusercontent.com/anthonyc-r/Bridgeplay/720023bc6bfc1df6c7e54c2ee0a9c190106d122f/dxmt-patch/artifacts",
+        ])
     }
 
     @Test("Stripping the builtin marker turns a builtin PE into a native one and refuses anything else")

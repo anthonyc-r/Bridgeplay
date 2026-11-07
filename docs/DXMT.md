@@ -4,6 +4,11 @@ Bridgeplay ships DXMT built from a pinned master commit, not the v0.80 release, 
 the 262 commits since that release (D3D11 fixes, the macOS 27 HUD fix, Xcode 27 build
 fixes, the WIP D3D12 backend).
 
+Intel builds use that commit with the buffer access guards documented in
+[dxmt-patch/README.md](../dxmt-patch/README.md). Apple Silicon keeps the original
+upstream artifact and all of its existing hashes. The upstream tables below
+describe that unchanged artifact.
+
 | | |
 | - | - |
 | Commit | `e94c312f5c054263acf261cfa109edf13e757587` (`v0.80-262-ge94c312`, 2026-10-06) |
@@ -14,7 +19,7 @@ fixes, the WIP D3D12 backend).
 
 ## In Bridgeplay
 
-Both free engines download this tarball from
+On Apple Silicon, both free engines download this tarball from
 `https://github.com/raymondchins/Bridgeplay/releases/download/dxmt-e94c312/` into the
 engine cache (`FreeEngine.dxmt`, also `FreeEngineWinecx.current.renderer`). `winemetal.so`
 and both `winemetal.dll` go into `lib/wine` as shipped. `d3d10core`, `d3d11` and `dxgi` go to
@@ -38,6 +43,17 @@ archive exactly. `nvapi64`, `nvngx` and `d3d12.dll` are not installed.
 `FreeEngineTests.downloadsAndUnpacksRealDxmt` downloads the real tarball and checks all of
 this.
 
+On Intel, `FreeEngine.intelDxmt` selects
+`dxmt-e94c312-2898d5da398b-d3d11.tar.gz`, SHA-256
+`b471850e25f268d83f8a3a944b041066077e5c92e8f4cd122cdee9fb517bc6c4`.
+Its [binary and corresponding-source archives](../dxmt-patch/artifacts/) are
+served from immutable fork commit `720023bc6bfc1df6c7e54c2ee0a9c190106d122f`.
+The nine files use the same installation layout and builtin-marker treatment.
+Their exact shipped hashes are in the committed `.sha256` manifest; the six
+installed hashes are pinned in `FreeEngine.swift` and checked by
+`FreeEngineTests.committedIntelDxmt`. The patched artifact includes no D3D12
+backend. Its compiler version isolates the shader cache from the upstream build.
+
 ## Rebuilding
 
     DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
@@ -47,11 +63,17 @@ Add `--publish` to also create the `dxmt-<shortsha>` GitHub release once the bui
 checks pass. Needs Xcode with its Metal toolchain (`xcodebuild -downloadComponent
 MetalToolchain`), Homebrew `cmake bison flex mingw-w64`, and python3; the script installs
 meson 1.10.0 and ninja into a venv. Work goes to `scratch/dxmt-build/`, output to
-`scratch/dxmt-out/`: the binary tarball with `COPYING.LIB`, `LICENSE` and
-`LICENSE-0.80-and-earlier.txt` inside it, `dxmt-<shortsha>-source.tar.gz` (the Corresponding
+`scratch/dxmt-out/`: the binary tarball with `COPYING.LIB`, `LICENSE`, historical MIT
+and third-party notices (including the statically linked LLVM libraries) inside it,
+`dxmt-<shortsha>-source.tar.gz` (the Corresponding
 Source: the exact worktree the build ran from, submodules included), and a `.sha256`
 manifest covering both. Finished stages are reused. A cold run on an M5 Max
 takes about 6 minutes plus clones: LLVM about 3, Wine configure about 1, DXMT about 1.
+
+For the Intel build, add `--patch dxmt-patch/buffer-bounds.patch --d3d11-only`.
+Custom builds are packaged locally, with the patch hash in the filename; `--publish`
+is reserved for the upstream layout. The source archive also carries the patch,
+build scripts and dependency pins in `bridgeplay-build/`.
 
 It follows the gcc-release jobs of DXMT's `ci.yml` (LLVM 15.0.7 for x86_64-apple-darwin,
 Homebrew mingw-w64, meson 1.10.0), with these differences:
