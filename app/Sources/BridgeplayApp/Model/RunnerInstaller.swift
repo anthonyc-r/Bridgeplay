@@ -250,7 +250,10 @@ enum RunnerInstaller {
         else { return true }
         // ps prints the resolved path, and a clone can be a link to another drive.
         let root = clone.standardizedFileURL.path(percentEncoded: false)
-        let prefixes = [root, realpath(root, nil).map { defer { free($0) }; return String(cString: $0) }]
+        let prefixes = [root, realpath(root, nil).map { path in
+            defer { free(path) }
+            return String(cString: path)
+        }]
             .compactMap { $0 }
             .map { $0.hasSuffix("/") ? $0 : $0 + "/" }
         return result.stdout.split(separator: "\n").contains { line in
@@ -285,7 +288,10 @@ enum RunnerInstaller {
         }
         for tool in tools {
             let root = tool.standardizedFileURL.path(percentEncoded: false)
-            let scripts = Set([root, realpath(root, nil).map { defer { free($0) }; return String(cString: $0) }]
+            let scripts = Set([root, realpath(root, nil).map { path in
+                defer { free(path) }
+                return String(cString: path)
+            }]
                 .compactMap { $0 }
                 .map { ($0.hasSuffix("/") ? $0 : $0 + "/") + "run" })
             // Only the script being run counts: as the command itself or as a shell's first

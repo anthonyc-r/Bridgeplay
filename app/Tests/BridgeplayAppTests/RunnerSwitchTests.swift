@@ -734,7 +734,10 @@ struct RunnerRemovalTests {
         let link = runners.appending(path: "crossover-27")
         try fm.createSymbolicLink(at: link, withDestinationURL: real)
         let printed = real.path(percentEncoded: false).withCString { path in
-            realpath(path, nil).map { defer { free($0) }; return String(cString: $0) }
+            realpath(path, nil).map { resolved in
+                defer { free(resolved) }
+                return String(cString: resolved)
+            }
         } ?? ""
         let ps = dir.appending(path: "ps")
         try """

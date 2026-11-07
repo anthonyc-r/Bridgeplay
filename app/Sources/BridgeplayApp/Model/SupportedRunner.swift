@@ -122,7 +122,7 @@ enum SupportedRunners {
         case .build(let id): id
         case .nobody: nil
         }
-        let served = all.filter { installed.contains($0.id) }.flatMap { build in
+        let served = all.filter { installed.contains($0.id) }.flatMap { build -> [InstalledTool] in
             build.tools.enumerated().map { index, tool in
                 let name = build.id == holder && index == 0 ? legacyToolName : tool.name
                 return InstalledTool(

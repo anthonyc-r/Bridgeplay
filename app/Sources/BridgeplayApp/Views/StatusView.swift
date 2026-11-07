@@ -184,12 +184,16 @@ struct StatusView: View {
         }
         .navigationTitle("Status")
         .toolbar {
+            #if compiler(>=6.4)
             if #available(macOS 26.1, *) {
                 ToolbarItem(placement: .primaryAction) { refreshButton }
                     .visibilityPriority(.high)
             } else {
                 ToolbarItem(placement: .primaryAction) { refreshButton }
             }
+            #else
+            ToolbarItem(placement: .primaryAction) { refreshButton }
+            #endif
         }
         .confirmationDialog(
             String(localized: "Block Steam client updates?"),

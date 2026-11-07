@@ -53,12 +53,16 @@ struct PrefixesView: View {
             }
         }
         .toolbar {
+            #if compiler(>=6.4)
             if #available(macOS 26.1, *) {
                 ToolbarItemGroup(placement: .primaryAction) { strip }
                     .visibilityPriority(.high)
             } else {
                 ToolbarItemGroup(placement: .primaryAction) { strip }
             }
+            #else
+            ToolbarItemGroup(placement: .primaryAction) { strip }
+            #endif
         }
         .task { await model.load() }
         .confirmationDialog(
