@@ -52,7 +52,11 @@ The nine files use the same installation layout and builtin-marker treatment.
 Their exact shipped hashes are in the committed `.sha256` manifest; the six
 installed hashes are pinned in `FreeEngine.swift` and checked by
 `FreeEngineTests.committedIntelDxmt`. The patched artifact includes no D3D12
-backend. Its compiler version isolates the shader cache from the upstream build.
+backend. Its compiler version isolates the AIR shader cache from the upstream build.
+Metal's separate pipeline cache was still unversioned in this first artifact;
+see the [cache investigation](../dxmt-patch/README.md#metal-pipeline-cache-investigation)
+for the reproduced linkage failure. The game regenerated the failure after its cache
+was isolated, so clearing or versioning that cache alone is insufficient.
 
 ## Rebuilding
 

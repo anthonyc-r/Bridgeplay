@@ -14,8 +14,8 @@ invalid writes do not access memory. Structured-buffer index arithmetic uses
 64 bits to prevent wrapping a large index into a valid range. Threadgroup
 memory keeps its existing handling. Texture operations are outside this patch.
 
-`AIRCONV_VERSION=0x4250001a` gives the changed compiler a Bridgeplay cache
-namespace. Previously compiled shaders cannot be reused under the new version.
+`AIRCONV_VERSION=0x4250001a` gives the changed compiler's AIR cache a Bridgeplay
+namespace. Previously translated shaders cannot be reused under the new version.
 The CPU `airconv` tool also accepts `--metal-version=310` or `320`, allowing the
 same converter to be checked against the Metal 3.1 target used on Radeon.
 
@@ -79,5 +79,40 @@ proof that it was the only cause of the reset. In the first patched game test,
 Chained Together reached its menu and started a level, then exited normally
 after about 94 seconds. Its 2D overlays rendered, but the 3D scene was black;
 the log reported geometry/mesh pipeline linkage failures. That separate
-rendering failure remains unresolved by this buffer patch, so this artifact is
-not evidence of a fully working game.
+rendering failure was reproduced using the game's retained Metal pipeline cache,
+as described below. The game regenerated the failure after that cache was removed
+from use, so clearing or versioning the cache alone is insufficient.
+
+## Metal pipeline cache investigation
+
+The AIR database and Metal's pipeline cache are separate. Upstream DXGI calls
+`WMTSetMetalShaderCachePath` during DLL initialization, selecting
+`$(getconf DARWIN_USER_CACHE_DIR)/dxmt/<executable>/com.apple.metal`. That path
+does not include `AIRCONV_VERSION`, so changing the AIR compiler version leaves
+the previous Metal pipeline cache in use.
+
+All seven failing Chained Together shader combinations compiled with their exact
+attachment and blend settings outside the game. Small geometry rendering tests
+also passed on both Windows architectures, and 140 concurrent pipeline creations
+passed with 20 active workers. These controls did not explain the black scene.
+
+Using a private copy of the game's existing Metal cache reproduced all seven
+missing-`user(reg0_0)` linkage failures in native pipeline-creation tests. Three
+combinations replayed through Wine and the actual Winemetal bridge failed the same
+way. The same inputs passed with fresh cache directories. Those tests created
+pipelines without submitting game shaders to the GPU; no cache entries from the
+original directory were changed during the comparison.
+
+For the next game test, only the five-file game-specific `com.apple.metal`
+directory was archived. The sibling `shaders_310.db`, Wine prefix and game saves
+were retained. That game test again produced a black 3D scene and the same mesh
+linkage failures in its newly populated cache. The cached state can reproduce
+the failure, but the full game also creates that state; its cause remains under
+investigation. Versioning the Metal cache directory with `AIRCONV_VERSION` remains
+unvalidated in the full game. The buffer-only artifact listed above
+does not include the proposed cache-path change.
+
+`DXMT_USE_DEFAULT_METAL_CACHE=1` is an existing source-supported diagnostic switch
+that bypasses DXMT's custom Metal cache path. It selects the system's normal
+cache; it does not turn caching off. `DXMT_SHADER_CACHE=0` controls only the AIR
+database and does not bypass the retained Metal pipeline cache.

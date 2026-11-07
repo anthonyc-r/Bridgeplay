@@ -149,8 +149,35 @@ The native Steam launch log confirms DXMT, the windowed 720p arguments and the 3
 configuration. The first patched launch reached the menu and entered a level, but only
 2D overlays rendered: the 3D scene was black. The log recorded seven geometry/mesh
 pipeline linkage failures (fragment input `user(reg0_0)` missing from vertex outputs).
-The game exited normally after 94 seconds, with no new GPU reset report. This separate
-rendering failure remains unresolved by the buffer patch.
+The game exited normally after 94 seconds, with no new GPU reset report.
+
+The black scene's linkage failure was then reproduced using the retained Metal pipeline
+cache, separately from DXMT's versioned AIR database. The seven exact shader combinations and render-target
+settings compiled successfully in isolated native tests. Geometry rendering also passed
+on both Windows architectures, and 140 pipeline creations passed under a 20-worker
+concurrent compilation workload. These passing controls used different Metal caches
+from the game.
+
+With a private copy of the game's Metal cache, all seven native pipeline creations
+failed with the game's exact missing-`user(reg0_0)` error. Three shader combinations
+also failed through Wine and the actual Winemetal bridge. All passed with fresh custom
+cache directories. These comparisons involved pipeline creation only, with no GPU
+submission of game shaders. The copied Metal cache is sufficient to reproduce those
+failures; the valid shader declarations alone do not explain why the game generates
+the failing state.
+
+DXGI chooses `$(getconf DARWIN_USER_CACHE_DIR)/dxmt/<executable>/com.apple.metal`
+during initialization. Unlike DXMT's AIR database, that directory was not namespaced
+by the compiler version. For the next manual game test, the five-file cache for
+`ChainedTogether-Win64-Shipping.exe` was archived to
+`build/diagnostics/chained-together-mesh-capture-20261107/original-metal-cache`.
+The AIR database, prefixes and saves were preserved. The user then retested the game:
+its 3D scene remained black, and the same linkage failures returned in a newly populated
+cache. Clearing the Metal cache did not resolve rendering; a versioned cache path remains unvalidated.
+The first buffer-only artifact does not include the proposed cache-path change, and
+the source of the game-generated failing cache state remains under investigation.
+The current local test adds `DXMT_USE_DEFAULT_METAL_CACHE=1` to bypass the custom
+cache path entirely. Its full-game result is pending.
 
 The probe source and reproduction instructions are in [bridge/tests](../bridge/tests/README.md).
 The passing component tests do not establish game stability, save handling or multiplayer
