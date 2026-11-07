@@ -176,8 +176,20 @@ its 3D scene remained black, and the same linkage failures returned in a newly p
 cache. Clearing the Metal cache did not resolve rendering; a versioned cache path remains unvalidated.
 The first buffer-only artifact does not include the proposed cache-path change, and
 the source of the game-generated failing cache state remains under investigation.
-The current local test adds `DXMT_USE_DEFAULT_METAL_CACHE=1` to bypass the custom
-cache path entirely. Its full-game result is pending.
+The next local test added `DXMT_USE_DEFAULT_METAL_CACHE=1` to select Metal's system
+cache. The user confirmed that the 3D scene rendered, a level started, and walking
+worked. The game then aborted with Metal's `Command encoder released without
+endEncoding` assertion. A subsequent trace located an earlier native write access
+violation in AMD's `amdMtl_GFX10_WriteRenderEncoderHwCtxRegs`, first while encoding
+a render batch and again when ending that encoder. The assertion follows those
+faults during autorelease-pool cleanup. The system cache resolves the observed black
+scene, but does not establish a stable game session; the driver fault remains under
+investigation.
+
+The runner now defaults this setting to `1` on Intel after reading gamefixes.
+Explicit conf or launch-option values, including `0` and an empty value, are preserved
+and forwarded unchanged. Apple Silicon's default is unchanged. Focused environment
+and gamefix tests cover this precedence and both child launch paths.
 
 The probe source and reproduction instructions are in [bridge/tests](../bridge/tests/README.md).
 The passing component tests do not establish game stability, save handling or multiplayer

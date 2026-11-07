@@ -60,6 +60,7 @@ logged, when:
 | `HIDE_WINE_EXPORTS` | `0`, `1` | `1` makes `GetProcAddress` fail for ntdll's `wine_*` exports on the WineCX 11.17 engine (`hide-wine-exports-patch/`), like Wine Staging's `HideWineExports`. For games that turn features off under Wine: The Witcher 3 5.0 skips NVIDIA Streamline, so no DLSS |
 | `ROCKSTAR_SHIM` | `0`, `1` | `1` stages `rockstar-shim/`'s `version.dll` next to `SocialClubHelper.exe` (`C:\Program Files\Rockstar Games\Social Club`) and next to the game's exe at the game launch, and adds `version=n,b`. It makes the Rockstar Games Launcher's CEF windows draw on winemac and, on `dxvk`, gives GTA5.exe DXVK's dxgi instead of D3DMetal's (`NOTPROTON_ROCKSTAR_DXGI`). A `version.dll` the folder already had (a mod loader) is moved to `version.dll.bridgeplay-orig` first. Without the key, or on an engine without the shim, staged copies are removed and that file is put back, except in a game folder another launch (another macOS user's too) is still using. WineCX 11.17 only; GTA V Legacy's `gamefixes/271590.conf` sets it. Details in `rockstar-shim/README.md` |
 | `DXMT_*`, `DXVK_*`, `MVK_*`, `VKD3D_*`, `D3DM_*`, `STAGING_*` | any | Exported as is |
+| `DXMT_USE_DEFAULT_METAL_CACHE` | `1` uses the system Metal cache; other values retain DXMT's custom cache | Defaults to `1` on Intel after conf loading. Explicit values, including an empty value, are preserved. Apple Silicon has no Bridgeplay default for this key |
 | `MTL_HUD_ENABLED`, `WINEDEBUG`, `WINE_LARGE_ADDRESS_AWARE`, `WINE_CPU_TOPOLOGY` | any | Exported as is |
 | `CX_FWD_COMPAT_GL_CTX` | any | Exported as is: WineCX's switch for forward-compatible OpenGL contexts, for testing OpenGL (`wined3d`) games |
 
@@ -89,6 +90,15 @@ The backend is picked in this order:
 5. `dxmt`, or `d3dmetal` on an engine with D3DMetal
 
 A backend the engine lacks falls back: `dxvk` → `dxmt` → `wined3d`, and `d3dmetal` → `dxmt`.
+
+### DXMT on Intel
+
+The runner defaults `DXMT_USE_DEFAULT_METAL_CACHE` to `1` on Intel, selecting Metal's
+system cache. This avoids the missing mesh-shader outputs observed with DXMT's custom
+cache on a Radeon Pro 5700 XT. It does not disable caching or clear existing caches.
+An explicit setting in any conf or the launch options wins, including `0` or an empty
+value. Apple Silicon's default is unchanged. See [Intel validation](INTEL-PORT.md) for
+the game test and its remaining stability limitation.
 
 ### WineCX with D3DMetal
 

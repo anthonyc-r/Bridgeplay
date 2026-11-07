@@ -546,6 +546,14 @@ load_gamefixes() {
   done
 }
 
+# The custom Metal cache can lose mesh shader outputs on Intel Radeon drivers.
+apply_dxmt_cache_default() {
+  if [ "${np_host_arch:-}" = x86_64 ] && [ -z "${DXMT_USE_DEFAULT_METAL_CACHE+x}" ]; then
+    export DXMT_USE_DEFAULT_METAL_CACHE=1
+    gamefix_log "DXMT_USE_DEFAULT_METAL_CACHE=1 by default on Intel"
+  fi
+}
+
 # Launch options > gamefix MSYNC > an engine with msync > the prefix's last choice > off.
 resolve_msync() {
   msync_from=environment
@@ -1124,6 +1132,7 @@ compose_dll_overrides() {
 }
 
 load_gamefixes || true
+apply_dxmt_cache_default
 
 # Steam gives every non-Steam shortcut a game ID ending in 0x02000000.
 shortcut_game_id() {

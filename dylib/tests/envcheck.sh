@@ -258,6 +258,40 @@ is "Intel logs the skipped Rosetta default" 1 \
 is "Intel logs the skipped D3DMetal default" 1 \
   "$(grep -c 'D3DM_ENABLE_METALFX ignored on Intel, the shipped-global conf value is not applied' "$work/conf-x86_64.log" || true)"
 
+echo "== Intel DXMT Metal cache default and child environment =="
+cache_default=$(sed -n '/^apply_dxmt_cache_default() {$/,/^}$/p' "$SRC")
+[ -n "$cache_default" ] || { echo "FAIL: DXMT cache default not found"; exit 1; }
+cache_at=$(grep -n '^apply_dxmt_cache_default$' "$SRC" | cut -d: -f1)
+conf_at=$(grep -n '^load_gamefixes || true$' "$SRC" | cut -d: -f1)
+[ "$cache_at" -gt "$conf_at" ] && [ "$cache_at" -lt "$forward_at" ] ||
+  bad "cache default runs after conf loading and before child forwarding" "$conf_at < default < $forward_at" "$cache_at"
+cache_environment() {
+  cache_arch=$1
+  shift
+  # shellcheck disable=SC2016 # The child evaluates the production default and forwarding blocks.
+  env -i PATH="$PATH" np_host_arch="$cache_arch" "$@" functions="$gamefix_functions" \
+    cache_default="$cache_default" forward="$forward" log=/dev/null sh -ec '
+      eval "$functions"
+      eval "$cache_default"
+      apply_dxmt_cache_default
+      sh -c '\''printf "child=%s\n" "${DXMT_USE_DEFAULT_METAL_CACHE-<unset>}"'\''
+      set --
+      eval "$forward"
+      for arg in "$@"; do
+        case "$arg" in DXMT_USE_DEFAULT_METAL_CACHE=*) printf "launcher=%s\n" "${arg#*=}" ;; esac
+      done
+    '
+}
+is "Intel helpers and the game launcher receive the system-cache default" 'child=1
+launcher=1' "$(cache_environment x86_64)"
+is "an explicit zero reaches both child paths unchanged" 'child=0
+launcher=0' "$(cache_environment x86_64 DXMT_USE_DEFAULT_METAL_CACHE=0)"
+is "an explicitly empty value reaches both child paths unchanged" 'child=
+launcher=' "$(cache_environment x86_64 DXMT_USE_DEFAULT_METAL_CACHE=)"
+is "Apple Silicon receives no new default" 'child=<unset>' "$(cache_environment arm64)"
+is "Apple Silicon still forwards an explicit cache setting" 'child=1
+launcher=1' "$(cache_environment arm64 DXMT_USE_DEFAULT_METAL_CACHE=1)"
+
 echo "== the support folder and the BRIDGEPLAY_ names =="
 # shellcheck disable=SC2016 # Match the literal assignment.
 pick=$(sed -n '/^np_support="\$HOME\/Library\/Application Support\/bridgeplay"$/,/^fi$/p' "$SRC")

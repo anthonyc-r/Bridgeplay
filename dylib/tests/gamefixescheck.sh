@@ -6,7 +6,7 @@ SRC="${1:-$(dirname "$0")/../feats/compat_run.sh}"
 
 functions=""
 for name in gamefix_log valid_dll_overrides gamefix_reason gamefix_read gamefix_apply_env \
-	load_gamefixes resolve_msync graphics_log d3dmetal_engine backend_dlls managed_dlls backend_available \
+	load_gamefixes apply_dxmt_cache_default resolve_msync graphics_log d3dmetal_engine backend_dlls managed_dlls backend_available \
 	backend_record pe_word pe_words pe_rva_offset imports_d3d12 select_backend stage_backend_file restore_stock_dll \
 	activate_backend record_backend rockstar_shim_copy rockstar_shim_lock_fd rockstar_shim_in_use rockstar_shim_folders stage_rockstar_shim compose_dll_overrides; do
 	body=$(sed -n "/^$name() {\$/,/^}\$/p" "$SRC")
@@ -106,6 +106,7 @@ launch() {
 			gamefix_keys="" gamefix_backend="" gamefix_dlloverrides="" gamefix_msync="" gamefix_nvapi="" gamefix_dlss_fg="" gamefix_args="" gamefix_rockstar_shim=""
 			backend_root="$CX_ROOT/lib/notproton-backends"
 			load_gamefixes || true
+			apply_dxmt_cache_default
 			resolve_msync
 			export WINEMSYNC="${WINEMSYNC:-0}"
 			select_backend "$1"
@@ -117,7 +118,7 @@ launch() {
 			eval "$bridge_line"
 			for v in backend WINEDLLOVERRIDES WINEMSYNC msync_from NOTPROTON_RETINA NOTPROTON_FRAMEGEN \
 				NOTPROTON_FRAMEGEN_QUALITY NOTPROTON_FRAMEGEN_UI NOTPROTON_FRAMEGEN_FALLBACK NOTPROTON_FRAMEGEN_ENGINE CX_GRAPHICS_BACKEND \
-				DXVK_HUD VKD3D_CONFIG WINEDEBUG MTL_HUD_ENABLED D3DM_VENDOR_ID D3DM_DEVICE_ID D3DM_DEVICE_DESCRIPTION NOTPROTON_NGX_SIGNER NOTPROTON_DRIVER_VERSION CX_ACTIVE_GRAPHICS_BACKEND NOTPROTON_VSYNC NOTPROTON_HIDE_WINE_EXPORTS NOTPROTON_ROCKSTAR_DXGI CX_FWD_COMPAT_GL_CTX gamefix_args PATH DYLD_INSERT_LIBRARIES; do
+				DXMT_USE_DEFAULT_METAL_CACHE DXVK_HUD VKD3D_CONFIG WINEDEBUG MTL_HUD_ENABLED D3DM_VENDOR_ID D3DM_DEVICE_ID D3DM_DEVICE_DESCRIPTION NOTPROTON_NGX_SIGNER NOTPROTON_DRIVER_VERSION CX_ACTIVE_GRAPHICS_BACKEND NOTPROTON_VSYNC NOTPROTON_HIDE_WINE_EXPORTS NOTPROTON_ROCKSTAR_DXGI CX_FWD_COMPAT_GL_CTX gamefix_args PATH DYLD_INSERT_LIBRARIES; do
 				eval "printf \"%s=%s\\n\" \$v \"\${$v-<unset>}\""
 			done
 		' launch "$target" > "$case_dir/out" 2>&1 || bad "the launch sequence ran to the end" "exit 0" "exit $? $(tail -1 "$case_dir/out")"
@@ -241,6 +242,30 @@ full_engine
 launch waitforexitandrun "$case_dir/game/game.exe" BRIDGEPLAY_BACKEND=metal
 is "an invalid BRIDGEPLAY_BACKEND falls through to auto" "dxmt" "$(got backend)"
 has "and is logged" "BRIDGEPLAY_BACKEND is not dxmt, dxvk, wined3d or d3dmetal, ignored" "$case_dir/log"
+
+echo "== Intel DXMT cache default respects conf and launch options"
+new_case
+full_engine
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=x86_64
+is "Intel without a setting uses the system Metal cache" "1" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
+has "the Intel default is logged" "DXMT_USE_DEFAULT_METAL_CACHE=1 by default on Intel" "$case_dir/log"
+default_conf 'DXMT_USE_DEFAULT_METAL_CACHE=0'
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=x86_64
+is "a shipped gamefix can override the Intel default" "0" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
+user_conf 'DXMT_USE_DEFAULT_METAL_CACHE=1'
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=x86_64
+is "a user gamefix still wins over the shipped cache choice" "1" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=x86_64 DXMT_USE_DEFAULT_METAL_CACHE=0
+is "launch options still win over both cache confs" "0" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=x86_64 DXMT_USE_DEFAULT_METAL_CACHE=
+is "an explicitly empty launch option is preserved" "" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
+user_conf 'DXMT_USE_DEFAULT_METAL_CACHE='
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=x86_64
+is "an explicitly empty user conf is preserved" "" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
+new_case
+full_engine
+launch waitforexitandrun "$case_dir/game/game.exe" np_host_arch=arm64
+is "Apple Silicon keeps DXMT's existing cache selection" "<unset>" "$(got DXMT_USE_DEFAULT_METAL_CACHE)"
 
 echo "== auto-detect reads the import table"
 new_case
