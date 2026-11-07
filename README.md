@@ -4,6 +4,7 @@
 
 > **Intel macOS fork:** this fork adds native Steam integration for Intel Macs on
 > macOS 26, using WineCX and DXMT. See [Intel build, installation and validation](docs/INTEL-PORT.md).
+> Game support remains experimental: Chained Together fails on the tested Radeon Pro 5700 XT.
 > Build the Intel app from this fork; the upstream download and automatic update feed
 > carry the Apple Silicon version. The upstream overview below describes that version.
 

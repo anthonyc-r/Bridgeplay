@@ -84,13 +84,14 @@ connect the desktop freeze to the game's graphics workload, but do not identify 
 specific shader or distinguish a DXMT defect from a Metal/AMD driver defect. A lower
 resolution or frame-rate cap alone is not an established fix.
 
-The next graphics alternative to evaluate is DXVK through MoltenVK; it has not yet
-passed an end-to-end game test on this machine. The passing component tests above do
-not establish game stability, save handling or multiplayer behavior.
+The DXVK/MoltenVK follow-up also failed on 2026-11-07, immediately during startup.
+Unreal reported `E_INVALIDARG` while creating a 1×1×1 BGRA8 texture with render-target
+and shader-resource bindings. No new GPU-reset or WindowServer reports were observed
+after this attempt. Neither renderer has passed an end-to-end game test on this machine.
 
-For that manual follow-up, a user override in
+The follow-up used a user override in
 `~/Library/Application Support/bridgeplay/gamefixes/2567870.conf` selects a 720p window
-and caps the frame rate. Keep selecting **DirectX 11** in Steam's launch dialog; choosing
+and capped the frame rate. It selected **DirectX 11** in Steam's launch dialog; choosing
 DirectX 12 would conflict with these arguments. This is a diagnostic configuration,
 not a validated shipped game fix:
 
@@ -101,8 +102,22 @@ DXVK_FRAME_RATE=30
 DXVK_ASYNC=0
 ```
 
-A selection-only preflight against the installed launcher accepts all four keys and
-selects DXVK over the prefix's previous DXMT record. It does not launch Wine or the game.
+A selection-only preflight against the installed launcher accepted all four keys and
+selected DXVK over the prefix's previous DXMT record. The actual launch log confirmed
+DXVK and the windowed arguments, but the texture failure prevented a usable game session.
 Windowed mode keeps the game from filling the display; it cannot contain a GPU-driver
 hang. DXMT lists this GPU's Intel support as
 [experimental](https://github.com/3Shain/dxmt/wiki/Device-System-Runtime-Specifications).
+
+A native capability-only probe confirmed the DXVK failure: MoltenVK 1.4.2 accepts
+ordinary 3D BGRA8 and RGBA8 images, but returns `VK_ERROR_FORMAT_NOT_SUPPORTED` with
+`VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT`, which DXVK needs for these render targets.
+It reports `imageView2DOn3DImage=0`. MoltenVK deliberately disables placement heaps
+on AMD because of [driver corruption](https://github.com/KhronosGroup/MoltenVK/issues/2475).
+Setting `MVK_CONFIG_USE_MTLHEAP=2` in a separate capability-query process changes the
+reported support, but that does not establish safe rendering. No game or GPU submission
+was run with that override, and it is not included in the game configuration.
+
+The probe source and reproduction instructions are in [bridge/tests](../bridge/tests/README.md).
+The passing component tests do not establish game stability, save handling or multiplayer
+behavior. Chained Together is currently blocked by graphics compatibility on this Mac.
