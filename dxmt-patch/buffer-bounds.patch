@@ -1,0 +1,366 @@
+diff --git a/src/airconv/airconv_cli.cpp b/src/airconv/airconv_cli.cpp
+index e9e6573..2e8dd9c 100644
+--- a/src/airconv/airconv_cli.cpp
++++ b/src/airconv/airconv_cli.cpp
+@@ -65,6 +65,10 @@ static cl::opt<bool>
+ static cl::opt<bool>
+   OptLevelO2("O2", cl::desc("Optimization level 2. Similar to clang -O2. "));
+ 
++static cl::opt<unsigned> MetalVersion(
++    "metal-version", cl::init(320), cl::desc("Target Metal shader version: 310 or 320")
++);
++
+ static cl::opt<bool> PreserveBitcodeUseListOrder(
+   "preserve-bc-uselistorder",
+   cl::desc("Preserve use-list order when writing LLVM bitcode."),
+@@ -133,6 +137,10 @@ int main(int argc, char **argv) {
+   );
+   Context.setOpaquePointers(false);
+   cl::ParseCommandLineOptions(argc, argv, "DXBC to Metal AIR transpiler\n");
++  if (MetalVersion != 310 && MetalVersion != 320) {
++    errs() << "metal-version must be 310 or 320\n";
++    return 1;
++  }
+ 
+   // bool FastMath = true;
+   // for (StringRef Flag : f) {
+@@ -216,7 +224,7 @@ int main(int argc, char **argv) {
+   }
+ 
+   SM50_SHADER_COMMON_DATA data;
+-  data.metal_version = SM50_SHADER_METAL_320;
++  data.metal_version = static_cast<SM50_SHADER_METAL_VERSION>(MetalVersion.getValue());
+   data.flags = {};
+   data.next = 0;
+   data.type = SM50_SHADER_COMMON;
+@@ -406,4 +414,4 @@ int main(int argc, char **argv) {
+   Out->keep();
+ 
+   return 0;
+-}
+\ No newline at end of file
++}
+diff --git a/src/airconv/airconv_public.h b/src/airconv/airconv_public.h
+index e167ae4..d3a0c34 100644
+--- a/src/airconv/airconv_public.h
++++ b/src/airconv/airconv_public.h
+@@ -5,7 +5,8 @@
+ #ifndef __AIRCONV_H
+ #define __AIRCONV_H
+ 
+-#define AIRCONV_VERSION 26
++// Bridgeplay cache namespace: do not reuse shaders with unguarded null accesses.
++#define AIRCONV_VERSION 0x4250001a
+ 
+ #ifdef __cplusplus
+ #include <string>
+diff --git a/src/airconv/nt/dxbc_converter_base.cpp b/src/airconv/nt/dxbc_converter_base.cpp
+index 58a101c..fb697d4 100644
+--- a/src/airconv/nt/dxbc_converter_base.cpp
++++ b/src/airconv/nt/dxbc_converter_base.cpp
+@@ -2251,16 +2251,20 @@ Converter::operator()(const InstLoadRaw &load) {
+ 
+   if (auto Comp = ComponentFromScalarMask(Mask, Buf->Swizzle); Comp >= 0) {
+     auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, ir.getInt32(Comp)));
+-    auto ValueInt = Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
+-                                        : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    auto ValueInt = EmitGuardedBufferAccess(Ptr, ir.getInt32Ty(), [&]() -> llvm::Value * {
++      return Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
++                                : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    });
+     return StoreOperand(load.dst, MaskSwizzle(ValueInt, Mask));
+   }
+ 
+   llvm::Value *ValueVec = llvm::PoisonValue::get(air.getIntTy(4));
+   for (auto [DstComp, _] : EnumerateComponents(MemoryAccessMask(Mask, Buf->Swizzle))) {
+     auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, ir.getInt32(DstComp)));
+-    auto ValueInt = Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
+-                                        : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    auto ValueInt = EmitGuardedBufferAccess(Ptr, ir.getInt32Ty(), [&]() -> llvm::Value * {
++      return Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
++                                : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    });
+     ValueVec = ir.CreateInsertElement(ValueVec, ValueInt, DstComp);
+   }
+   StoreOperand(load.dst, MaskSwizzle(ValueVec, Mask, Buf->Swizzle));
+@@ -2277,22 +2281,31 @@ Converter::operator()(const InstLoadStructured &load) {
+   mask_t Mask = GetMask(load.dst);
+   bool Volatile = cast<llvm::PointerType>(Buf->Pointer->getType())->getAddressSpace() == 3;
+ 
+-  auto IndexStruct =
+-      ir.CreateMul(ir.getInt32(Buf->StructureStride >> 2), LoadOperand(load.src_address, kMaskComponentX));
+-  auto Index = ir.CreateAdd(IndexStruct, ir.CreateLShr(LoadOperand(load.src_byte_offset, kMaskComponentX), 2));
++  auto IndexType = Volatile ? ir.getInt32Ty() : ir.getInt64Ty();
++  auto IndexStruct = ir.CreateMul(
++      llvm::ConstantInt::get(IndexType, Buf->StructureStride >> 2),
++      ir.CreateZExtOrTrunc(LoadOperand(load.src_address, kMaskComponentX), IndexType)
++  );
++  auto Index = ir.CreateAdd(
++      IndexStruct, ir.CreateZExtOrTrunc(ir.CreateLShr(LoadOperand(load.src_byte_offset, kMaskComponentX), 2), IndexType)
++  );
+ 
+   if (auto Comp = ComponentFromScalarMask(Mask, Buf->Swizzle); Comp >= 0) {
+-    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, ir.getInt32(Comp)));
+-    auto ValueInt = Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
+-                                        : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, llvm::ConstantInt::get(IndexType, Comp)));
++    auto ValueInt = EmitGuardedBufferAccess(Ptr, ir.getInt32Ty(), [&]() -> llvm::Value * {
++      return Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
++                                : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    });
+     return StoreOperand(load.dst, MaskSwizzle(ValueInt, Mask));
+   }
+ 
+   llvm::Value *ValueVec = llvm::PoisonValue::get(air.getIntTy(4));
+   for (auto [DstComp, _] : EnumerateComponents(MemoryAccessMask(Mask, Buf->Swizzle))) {
+-    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, ir.getInt32(DstComp)));
+-    auto ValueInt = Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
+-                                        : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, llvm::ConstantInt::get(IndexType, DstComp)));
++    auto ValueInt = EmitGuardedBufferAccess(Ptr, ir.getInt32Ty(), [&]() -> llvm::Value * {
++      return Buf->GlobalCoherent ? (llvm::Value *)air.CreateDeviceCoherentLoad(ir.getInt32Ty(), Ptr)
++                                : (llvm::Value *)ir.CreateLoad(ir.getInt32Ty(), Ptr, Volatile);
++    });
+     ValueVec = ir.CreateInsertElement(ValueVec, ValueInt, DstComp);
+   }
+   StoreOperand(load.dst, MaskSwizzle(ValueVec, Mask, Buf->Swizzle));
+@@ -2323,10 +2336,13 @@ Converter::operator()(const InstStoreRaw &store) {
+ 
+   for (auto [DstComp, _] : EnumerateComponents(Buf->Mask)) {
+     auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, ir.getInt32(DstComp)));
+-    if (Buf->GlobalCoherent)
+-      air.CreateDeviceCoherentStore(ExtractElement(Value, DstComp), Ptr);
+-    else
+-      ir.CreateStore(ExtractElement(Value, DstComp), Ptr, Volatile);
++    EmitGuardedBufferAccess(Ptr, ir.getVoidTy(), [&]() -> llvm::Value * {
++      if (Buf->GlobalCoherent)
++        air.CreateDeviceCoherentStore(ExtractElement(Value, DstComp), Ptr);
++      else
++        ir.CreateStore(ExtractElement(Value, DstComp), Ptr, Volatile);
++      return nullptr;
++    });
+   }
+ }
+ 
+@@ -2349,18 +2365,26 @@ Converter::operator()(const InstStoreStructured &store) {
+ 
+   bool Volatile = cast<llvm::PointerType>(Buf->Pointer->getType())->getAddressSpace() == 3;
+ 
+-  auto IndexStruct =
+-      ir.CreateMul(ir.getInt32(Buf->StructureStride >> 2), LoadOperand(store.dst_address, kMaskComponentX));
+-  auto Index = ir.CreateAdd(IndexStruct, ir.CreateLShr(LoadOperand(store.dst_byte_offset, kMaskComponentX), 2));
++  auto IndexType = Volatile ? ir.getInt32Ty() : ir.getInt64Ty();
++  auto IndexStruct = ir.CreateMul(
++      llvm::ConstantInt::get(IndexType, Buf->StructureStride >> 2),
++      ir.CreateZExtOrTrunc(LoadOperand(store.dst_address, kMaskComponentX), IndexType)
++  );
++  auto Index = ir.CreateAdd(
++      IndexStruct, ir.CreateZExtOrTrunc(ir.CreateLShr(LoadOperand(store.dst_byte_offset, kMaskComponentX), 2), IndexType)
++  );
+ 
+   auto Value = LoadOperand(store.src, Buf->Mask);
+ 
+   for (auto [DstComp, _] : EnumerateComponents(Buf->Mask)) {
+-    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, ir.getInt32(DstComp)));
+-    if (Buf->GlobalCoherent)
+-      air.CreateDeviceCoherentStore(ExtractElement(Value, DstComp), Ptr);
+-    else
+-      ir.CreateStore(ExtractElement(Value, DstComp), Ptr, Volatile);
++    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.value(), ir.CreateAdd(Index, llvm::ConstantInt::get(IndexType, DstComp)));
++    EmitGuardedBufferAccess(Ptr, ir.getVoidTy(), [&]() -> llvm::Value * {
++      if (Buf->GlobalCoherent)
++        air.CreateDeviceCoherentStore(ExtractElement(Value, DstComp), Ptr);
++      else
++        ir.CreateStore(ExtractElement(Value, DstComp), Ptr, Volatile);
++      return nullptr;
++    });
+   }
+ }
+ 
+@@ -2368,10 +2392,15 @@ llvm::Value *
+ Converter::LoadAtomicOpAddress(const AtomicBufferResourceHandle &Handle, const SrcOperand &Address) {
+   if (Handle.StructureStride > 0) {
+     auto Address2D = LoadOperand(Address, kMaskVecXY);
++    bool IsTGSM = llvm::cast<llvm::PointerType>(Handle.Pointer->getType())->getAddressSpace() == 3;
++    auto IndexType = IsTGSM ? ir.getInt32Ty() : ir.getInt64Ty();
+     return ir.CreateLShr(
+         ir.CreateAdd(
+-            ir.CreateMul(ir.getInt32(Handle.StructureStride), ExtractElement(Address2D, 0)),
+-            ExtractElement(Address2D, 1)
++            ir.CreateMul(
++                llvm::ConstantInt::get(IndexType, Handle.StructureStride),
++                ir.CreateZExtOrTrunc(ExtractElement(Address2D, 0), IndexType)
++            ),
++            ir.CreateZExtOrTrunc(ExtractElement(Address2D, 1), IndexType)
+         ),
+         2
+     );
+@@ -2421,8 +2450,11 @@ Converter::operator()(const InstAtomicBinOp &atomic) {
+ 
+   if (Buf) {
+     auto IntPtrOffset = LoadAtomicOpAddress(Buf.getValue(), atomic.dst_address);
+-    auto Ptr = ir.CreateGEP(ir.getInt32Ty(), Buf->Pointer, {IntPtrOffset});
+-    auto Value = air.CreateAtomicRMW(Op, Ptr, LoadOperand(atomic.src, kMaskComponentX));
++    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.getValue(), IntPtrOffset);
++    auto Operand = LoadOperand(atomic.src, kMaskComponentX);
++    auto Value = EmitGuardedBufferAccess(Ptr, ir.getInt32Ty(), [&]() {
++      return air.CreateAtomicRMW(Op, Ptr, Operand);
++    });
+     StoreOperand(atomic.dst_original, Value);
+     return;
+   }
+@@ -2480,12 +2512,16 @@ Converter::operator()(const InstAtomicImmCmpExchange &atomic) {
+ 
+   if (Buf) {
+     auto IntPtrOffset = LoadAtomicOpAddress(Buf.getValue(), atomic.dst_address);
+-    auto Ptr = ir.CreateGEP(ir.getInt32Ty(), Buf->Pointer, {IntPtrOffset});
+-    auto Value = ir.CreateAtomicCmpXchg(
+-        Ptr, LoadOperand(atomic.src0, kMaskComponentX), LoadOperand(atomic.src1, kMaskComponentX), {},
+-        AtomicOrdering::Monotonic, AtomicOrdering::Monotonic
+-    );
+-    StoreOperand(atomic.dst, ir.CreateExtractValue(Value, 0));
++    auto Ptr = CreateGEPInt32WithBoundCheck(Buf.getValue(), IntPtrOffset);
++    auto Compare = LoadOperand(atomic.src0, kMaskComponentX);
++    auto Replacement = LoadOperand(atomic.src1, kMaskComponentX);
++    auto Value = EmitGuardedBufferAccess(Ptr, ir.getInt32Ty(), [&]() {
++      auto Pair = ir.CreateAtomicCmpXchg(
++          Ptr, Compare, Replacement, {}, AtomicOrdering::Monotonic, AtomicOrdering::Monotonic
++      );
++      return ir.CreateExtractValue(Pair, 0);
++    });
++    StoreOperand(atomic.dst, Value);
+     return;
+   }
+ 
+@@ -2540,7 +2576,9 @@ Converter::operator()(const InstAtomicImmIncrement &atomic) {
+   if (!Ctr)
+     return;
+ 
+-  auto Value = air.CreateAtomicRMW(AtomicRMWInst::Add, Ctr->Pointer, ir.getInt32(1));
++  auto Value = EmitGuardedBufferAccess(Ctr->Pointer, ir.getInt32Ty(), [&]() {
++    return air.CreateAtomicRMW(AtomicRMWInst::Add, Ctr->Pointer, ir.getInt32(1));
++  });
+   StoreOperand(atomic.dst, Value);
+ }
+ void
+@@ -2552,9 +2590,12 @@ Converter::operator()(const InstAtomicImmDecrement &atomic) {
+   if (!Ctr)
+     return;
+ 
+-  auto Value = air.CreateAtomicRMW(AtomicRMWInst::Sub, Ctr->Pointer, ir.getInt32(1));
+-  // imm_atomic_consume returns new value
+-  StoreOperand(atomic.dst, ir.CreateSub(Value, ir.getInt32(1)));
++  auto Value = EmitGuardedBufferAccess(Ctr->Pointer, ir.getInt32Ty(), [&]() {
++    auto Previous = air.CreateAtomicRMW(AtomicRMWInst::Sub, Ctr->Pointer, ir.getInt32(1));
++    // imm_atomic_consume returns the new value only when a counter is bound.
++    return ir.CreateSub(Previous, ir.getInt32(1));
++  });
++  StoreOperand(atomic.dst, Value);
+ }
+ 
+ llvm::Optional<InterpolantHandle>
+@@ -2901,29 +2942,56 @@ Converter::DomainGeneratePrimitives(
+   ir.CreateCall(Fn, Ops);
+ }
+ 
++llvm::Value *
++Converter::EmitGuardedBufferAccess(
++    llvm::Value *Pointer, llvm::Type *ResultType, const std::function<llvm::Value *()> &Emit
++) {
++  if (llvm::cast<llvm::PointerType>(Pointer->getType())->getAddressSpace() == 3)
++    return Emit();
++
++  auto Origin = ir.GetInsertBlock();
++  auto Function = Origin->getParent();
++  auto Access = llvm::BasicBlock::Create(ir.getContext(), "buffer.access", Function);
++  auto Merge = llvm::BasicBlock::Create(ir.getContext(), "buffer.merge", Function);
++  ir.CreateCondBr(ir.CreateIsNotNull(Pointer), Access, Merge);
++  ir.SetInsertPoint(Access);
++  auto Value = Emit();
++  auto AccessEnd = ir.GetInsertBlock();
++  ir.CreateBr(Merge);
++  ir.SetInsertPoint(Merge);
++  if (ResultType->isVoidTy())
++    return nullptr;
++
++  auto Result = ir.CreatePHI(ResultType, 2, "buffer.result");
++  Result->addIncoming(llvm::Constant::getNullValue(ResultType), Origin);
++  Result->addIncoming(Value, AccessEnd);
++  return Result;
++}
++
+ llvm::Value *
+ Converter::CreateGEPInt32WithBoundCheck(BufferResourceHandle &Buffer, llvm::Value *Index) {
+   auto Addr = ir.CreateGEP(ir.getInt32Ty(), Buffer.Pointer, {Index});
+-  if (!Buffer.Metadata) {
++  if (llvm::cast<llvm::PointerType>(Buffer.Pointer->getType())->getAddressSpace() == 3)
+     return Addr;
++  auto Valid = ir.CreateIsNotNull(Buffer.Pointer);
++  if (Buffer.Metadata) {
++    auto ByteLength = ir.CreateZExtOrTrunc(DecodeRawBufferByteLength(Buffer.Metadata), Index->getType());
++    Valid = ir.CreateAnd(Valid, ir.CreateICmpULT(Index, ir.CreateLShr(ByteLength, 2)));
+   }
+-  auto ByteLength = DecodeRawBufferByteLength(Buffer.Metadata);
+-  return ir.CreateSelect(
+-      ir.CreateICmpULT(Index, ir.CreateLShr(ByteLength, 2)), Addr, llvm::Constant::getNullValue(Addr->getType())
+-  );
++  return ir.CreateSelect(Valid, Addr, llvm::Constant::getNullValue(Addr->getType()));
+ }
+ 
+ llvm::Value *
+ Converter::CreateGEPInt32WithBoundCheck(AtomicBufferResourceHandle &Buffer, llvm::Value *Index) {
+   auto Addr = ir.CreateGEP(ir.getInt32Ty(), Buffer.Pointer, {Index});
+-  if (!Buffer.Metadata) {
++  if (llvm::cast<llvm::PointerType>(Buffer.Pointer->getType())->getAddressSpace() == 3)
+     return Addr;
++  auto Valid = ir.CreateIsNotNull(Buffer.Pointer);
++  if (Buffer.Metadata) {
++    auto ByteLength = ir.CreateZExtOrTrunc(DecodeRawBufferByteLength(Buffer.Metadata), Index->getType());
++    Valid = ir.CreateAnd(Valid, ir.CreateICmpULT(Index, ir.CreateLShr(ByteLength, 2)));
+   }
+-  auto ByteLength = DecodeRawBufferByteLength(Buffer.Metadata);
+-
+-  return ir.CreateSelect(
+-      ir.CreateICmpULT(Index, ir.CreateLShr(ByteLength, 2)), Addr, llvm::Constant::getNullValue(Addr->getType())
+-  );
++  return ir.CreateSelect(Valid, Addr, llvm::Constant::getNullValue(Addr->getType()));
+ }
+ 
+ std::unique_ptr<llvm::IRBuilder<>::FastMathFlagGuard>
+@@ -2961,4 +3029,4 @@ Converter::SupportsNonExecutionBarrier() const {
+   return ctx.metal_version >= SM50_SHADER_METAL_320;
+ }
+ 
+-} // namespace dxmt::dxbc
+\ No newline at end of file
++} // namespace dxmt::dxbc
+diff --git a/src/airconv/nt/dxbc_converter_base.hpp b/src/airconv/nt/dxbc_converter_base.hpp
+index c600d3d..9027c2f 100644
+--- a/src/airconv/nt/dxbc_converter_base.hpp
++++ b/src/airconv/nt/dxbc_converter_base.hpp
+@@ -17,6 +17,7 @@
+  */
+ 
+ #pragma once
++#include <functional>
+ #include "llvm/ADT/Optional.h"
+ #include "llvm/IR/Constants.h"
+ #include "llvm/IR/FMF.h"
+@@ -500,6 +501,10 @@ public:
+ 
+   llvm::Value * CreateGEPInt32WithBoundCheck(AtomicBufferResourceHandle &Buffer, llvm::Value* Index);
+ 
++  llvm::Value *EmitGuardedBufferAccess(
++      llvm::Value *Pointer, llvm::Type *ResultType, const std::function<llvm::Value *()> &Emit
++  );
++
+   [[nodiscard]]
+   std::unique_ptr<llvm::IRBuilder<>::FastMathFlagGuard> UseFastMath(bool OptOut);
+ 
+@@ -525,4 +530,4 @@ private:
+   io_binding_map &res;
+ };
+ 
+-} // namespace dxmt::dxbc
+\ No newline at end of file
++} // namespace dxmt::dxbc

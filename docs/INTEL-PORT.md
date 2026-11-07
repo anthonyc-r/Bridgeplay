@@ -63,7 +63,8 @@ Completed on the Intel development machine:
   failure found during real Steam startup.
 - WineCX 4.7.3 starts a Windows command process natively.
 - Both 64-bit and 32-bit DXMT Direct3D 11 rendering tests render and read back the expected
-  pixels on the iMac's AMD GPU.
+  pixels on the iMac's AMD GPU. The locally patched renderer also passes the BGRA3D and
+  buffer-bounds regression tests described below.
 - A real Windows Steam API client connects to the running native Mac Steam client and
   observes its logged-in session through the freshly built bridge.
 - The Swift release build and all 1,000 tests in 100 suites pass. Localization checking
@@ -89,9 +90,9 @@ Unreal reported `E_INVALIDARG` while creating a 1×1×1 BGRA8 texture with rende
 and shader-resource bindings. No new GPU-reset or WindowServer reports were observed
 after this attempt. Neither renderer has passed an end-to-end game test on this machine.
 
-The follow-up used a user override in
-`~/Library/Application Support/bridgeplay/gamefixes/2567870.conf` selects a 720p window
-and capped the frame rate. It selected **DirectX 11** in Steam's launch dialog; choosing
+The DXVK follow-up used a user override in
+`~/Library/Application Support/bridgeplay/gamefixes/2567870.conf` that selected a 720p
+window and capped the frame rate. It selected **DirectX 11** in Steam's launch dialog; choosing
 DirectX 12 would conflict with these arguments. This is a diagnostic configuration,
 not a validated shipped game fix:
 
@@ -118,6 +119,35 @@ Setting `MVK_CONFIG_USE_MTLHEAP=2` in a separate capability-query process change
 reported support, but that does not establish safe rendering. No game or GPU submission
 was run with that override, and it is not included in the game configuration.
 
+The subsequent [DXMT buffer-bounds patch](../dxmt-patch/buffer-bounds.patch) makes
+raw and structured buffer memory operations conditional on valid addresses and widens
+structured address arithmetic to prevent 32-bit overflow. It also changes the shader
+cache version so the patched build does not reuse previously translated shaders. This
+addresses a concrete translation defect; the crash reports do not establish that it
+caused the original game hang.
+
+On 2026-11-07, [CPU verification](../dxmt-patch/tests/README.md) passed all 24 AIR
+translation, LLVM verification and conditional-block checks, plus 40 isolated guard-page
+runs across Metal 3.1 and 3.2. The rebuilt renderer then passed actual GPU tests in a
+disposable Wine prefix: 8×8 RGBA and 1×1×1 BGRA texture creation, clear and readback, and
+all eight single-thread buffer cases for both 64-bit and 32-bit Windows executables.
+These cover valid, out-of-range and null accesses, atomic operations and append/consume
+counters. The local log is `build/logs/dxmt-isolated-gpu-check.log`; no new GPU restart
+report was observed during these tests.
+
+The rebuilt DXMT backend was installed in the local WineCX runner after backing up the
+previous files to `build/diagnostics/dxmt-before-buffer-fix-20261107`. A further Chained
+Together test uses the following user override, replacing the earlier DXVK override:
+
+```ini
+BACKEND=dxmt
+ARGS=-d3d11 -windowed -ResX=1280 -ResY=720
+DXMT_CONFIG=d3d11.preferredMaxFrameRate=30
+```
+
+The native Steam launch log confirms DXMT, the windowed 720p arguments and the 30 FPS
+configuration. The end-to-end gameplay result for this patched renderer is pending.
+
 The probe source and reproduction instructions are in [bridge/tests](../bridge/tests/README.md).
 The passing component tests do not establish game stability, save handling or multiplayer
-behavior. Chained Together is currently blocked by graphics compatibility on this Mac.
+behavior. Chained Together remains unvalidated for play on this Mac.

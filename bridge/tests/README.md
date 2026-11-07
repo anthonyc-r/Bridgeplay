@@ -28,9 +28,84 @@ the game-launch hooks inside the Steam client.
 
 On the Intel development iMac (AMD Radeon Pro 5700 XT, macOS 26.6.2), WineCX
 runtime 4.7.3 with the pinned DXMT `e94c312` passed the original 2D checks for both
-architectures at D3D feature level 11.0. The added BGRA3D check and DXVK option have
-not yet been run. The probe source is `d3d11-smoke.c`; generated executables are not
-tracked. Passing these small checks does not establish game stability.
+architectures at D3D feature level 11.0. On 2026-11-07, a locally rebuilt DXMT with the
+[buffer-bounds patch](../../dxmt-patch/buffer-bounds.patch) passed both the original 2D
+and added BGRA3D checks for 64-bit and 32-bit executables in an isolated Wine prefix.
+The DXVK option has not been run through this smoke-test script. The probe source is
+`d3d11-smoke.c`; generated executables are not tracked. Passing these small checks does
+not establish game stability.
+
+## Buffer bounds regression probe
+
+`d3d11-buffer-bounds.c` and `d3d11-buffer-bounds.hlsl` exercise raw and structured
+buffer bounds in four single-thread compute shaders. Build either Windows architecture:
+
+```sh
+x86_64-w64-mingw32-gcc bridge/tests/d3d11-buffer-bounds.c -o build/d3d11-buffer-bounds-x64.exe -ld3dcompiler_47 -O2 -Wall -Wextra -Werror
+i686-w64-mingw32-gcc bridge/tests/d3d11-buffer-bounds.c -o build/d3d11-buffer-bounds-x86.exe -ld3dcompiler_47 -O2 -Wall -Wextra -Werror
+```
+
+The executable requires an explicit mode. Under Windows or Wine, run
+`d3d11-buffer-bounds-x64.exe --compile-only source.hlsl output-directory` to compile
+the entrypoints and export `.cso` bytecode plus `.asm` disassembly for CPU-only
+compiler checks. This mode does not load `d3d11.dll` or create a graphics device.
+HLSL optimization is disabled, and boundary-store addresses depend on a defined-zero
+SRV read so FXC retains the intended stores. Literal-only addresses make FXC remove
+the valid store preceding an overflowing raw-buffer store, even with optimization
+disabled, and defeat that regression check.
+Two additional entrypoints cover globally coherent buffers and valid threadgroup
+shared-memory operations; they are exported but never dispatched by this probe.
+Use Microsoft's native `d3dcompiler_47.dll` from the Windows SDK; Wine's bundled
+compiler may reject `AppendStructuredBuffer`. The compiler DLL is not redistributed
+with this repository.
+
+Actual GPU validation is a separate, explicit command:
+`d3d11-buffer-bounds-x64.exe --run source.hlsl 10000`. Configure the intended backend
+in a disposable Wine prefix before running it; `runtime-smoke.sh` does not run this
+probe. The last argument is the completion-query timeout in milliseconds (1–60000,
+default 10000). An external process timeout is still needed for a stuck driver call;
+the query timeout cannot recover a GPU hang.
+
+The eight dispatches cover bound and null bindings for each shader:
+
+- Raw and structured SRV/UAV reads, with valid indices, out-of-range indices, partial
+  raw vector reads, and address arithmetic near 32-bit overflow.
+- Valid writes and discarded out-of-range writes. Narrow views have initialized
+  guard words on both sides, and the entire backing buffers are checked afterward.
+- Atomic add and compare-exchange on valid, out-of-range and unbound UAVs, including
+  a non-returning atomic. Undefined atomic return values are recorded but not asserted.
+- Append/consume with separate valid or null UAVs. The bound case checks data and
+  hidden counts; the null case checks completion and zero-valued resource reads.
+
+Each dispatch has one thread and less than 1 KiB of resource data. Readback waits for
+an event query and maps with `DO_NOT_WAIT`. Microsoft specifies zero for each
+out-of-range component of a [raw load](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/ld-raw--sm5---asm-)
+and preserves in-range components of a [partial raw store](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/store-raw--sm5---asm-).
+Structured element-index overflow is covered; invalid offsets within a structure are
+excluded because their results are [undefined](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/ld-structured--sm5---asm-).
+Likewise, out-of-range [atomic return values](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/imm-atomic-iadd--sm5---asm-)
+are deliberately not treated as zero. Null bindings exercise zero-length handles;
+the probe does not create invalid zero-sized D3D11 buffers or views.
+
+This probe is a regression test for shader translation, not a stability or performance
+test. It must pass before a patched renderer is tested with a game; passing does not
+prove that all shaders used by a game are safe.
+
+Both Windows executables compile with warnings treated as errors. CPU-only compilation
+of all six entrypoints with Microsoft's Windows 8.1 SDK compiler succeeds under native
+Wine and WoW64 and produces identical DXBC. The patched renderer passes the
+[CPU verification suite](../../dxmt-patch/tests/README.md): 24 AIR translation, LLVM
+verification and conditional-block checks, plus 40 isolated guard-page runs for Metal
+3.1 and 3.2.
+
+On 2026-11-07, actual GPU execution with the rebuilt DXMT passed all eight cases for
+each Windows architecture on the Radeon Pro 5700 XT. Both executables printed
+`BRIDGEPLAY_D3D11_BUFFER_BOUNDS_OK`. The same isolated test run passed the 2D/BGRA3D
+smoke probes and observed no new GPU restart report; its local log is
+`build/logs/dxmt-isolated-gpu-check.log`. The coherent and TGSM entrypoints still receive
+compiler checks only. Chained Together's end-to-end gameplay result with this patched
+renderer is pending; the earlier unpatched DXMT game hang remains documented in
+[INTEL-PORT.md](../../docs/INTEL-PORT.md).
 
 ## MoltenVK 3D image capabilities
 

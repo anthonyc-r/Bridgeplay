@@ -2,14 +2,14 @@
 # Build DXMT from a pinned commit and package it the way the upstream v0.80 release
 # tarball is laid out, so FreeEngine can consume it in place of that release.
 #
-#   scripts/build-dxmt.sh [--publish] <commit>
+#   scripts/build-dxmt.sh [--publish] [--patch file] [--d3d11-only] <commit>
 #
 # Output: scratch/dxmt-out/dxmt-<shortsha>.tar.gz holding
 #   <shortsha>/x86_64-unix/winemetal.so
 #   <shortsha>/x86_64-windows/{d3d10core,d3d11,dxgi,winemetal,nvapi64,nvngx}.dll
 #   <shortsha>/i386-windows/{d3d10core,d3d11,dxgi,winemetal}.dll
 #   <shortsha>/x86_64-windows-d3d12/d3d12.dll   (WIP backend, kept apart on purpose)
-#   <shortsha>/{COPYING.LIB,LICENSE,LICENSE-0.80-and-earlier.txt}
+#   <shortsha>/{COPYING.LIB,LICENSE,LICENSE-*.txt} (including static LLVM notices)
 # and scratch/dxmt-out/dxmt-<shortsha>-source.tar.gz: the Corresponding Source
 # (LGPL-2.1-or-later), the exact DXMT worktree this build ran from, submodules
 # included, as <shortsha>/. --publish also creates the dxmt-<shortsha> GitHub release
@@ -28,17 +28,34 @@ set -euo pipefail
 
 PUBLISH=0
 COMMIT_ARG=""
-for arg in "$@"; do
+PATCH_FILE=""
+D3D11_ONLY=0
+usage() { echo "usage: $0 [--publish] [--patch file] [--d3d11-only] <dxmt commit>" >&2; }
+while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
     case "$arg" in
         --publish) PUBLISH=1 ;;
+        --patch)
+            [ "$#" -gt 0 ] && [ -z "$PATCH_FILE" ] || { usage; exit 2; }
+            PATCH_FILE=$1
+            shift
+            [ -f "$PATCH_FILE" ] || { echo "missing patch: $PATCH_FILE" >&2; exit 2; }
+            PATCH_FILE="$(cd "$(dirname "$PATCH_FILE")" && pwd)/$(basename "$PATCH_FILE")"
+            ;;
+        --d3d11-only) D3D11_ONLY=1 ;;
         *)
-            if [ -n "$COMMIT_ARG" ]; then echo "usage: $0 [--publish] <dxmt commit>" >&2; exit 2; fi
+            if [ -n "$COMMIT_ARG" ]; then usage; exit 2; fi
             COMMIT_ARG="$arg"
             ;;
     esac
 done
 if [ -z "$COMMIT_ARG" ]; then
-    echo "usage: $0 [--publish] <dxmt commit>" >&2
+    usage
+    exit 2
+fi
+if [ "$PUBLISH" -eq 1 ] && { [ -n "$PATCH_FILE" ] || [ "$D3D11_ONLY" -eq 1 ]; }; then
+    echo "custom builds are packaged locally; --publish is reserved for the upstream release layout" >&2
     exit 2
 fi
 # A commit, never a branch or tag that can move: 7 to 40 hex digits, checked below to be
@@ -75,7 +92,10 @@ MESON_VERSION="1.10.0"
 NINJA_VERSION="1.13.0"
 
 # The bison macOS ships is too old for wine's configure.
-export PATH="$WORK/venv/bin:/opt/homebrew/bin:/opt/homebrew/opt/bison/bin:$PATH"
+brew_prefix=$(brew --prefix 2>/dev/null || true)
+export PATH="$WORK/venv/bin:$brew_prefix/bin:$brew_prefix/opt/bison/bin:$PATH"
+JOBS=${DXMT_JOBS:-$(sysctl -n hw.ncpu)}
+case "$JOBS" in ''|*[!0-9]*|0) echo "DXMT_JOBS must be a positive integer" >&2; exit 2 ;; esac
 # Xcode, not the command line tools: DXMT compiles .metal shaders.
 if [ -z "${DEVELOPER_DIR:-}" ]; then
     DEVELOPER_DIR="$(xcode-select -p)"
@@ -126,7 +146,25 @@ case "$COMMIT" in "$COMMIT_ARG"*) ;; *) die "$COMMIT_ARG resolved to $COMMIT, a 
 SHORT="$(git -C "$SRC" rev-parse --short=7 "$COMMIT")"
 git -C "$SRC" -c advice.detachedHead=false checkout --quiet --detach "$COMMIT"
 git -C "$SRC" submodule update --quiet --init --recursive
-[ -z "$(git -C "$SRC" status --porcelain)" ] || die "$SRC has local changes"
+git -C "$SRC" diff --cached --quiet || die "$SRC has staged changes"
+if [ -n "$PATCH_FILE" ]; then
+    if [ -z "$(git -C "$SRC" status --porcelain)" ]; then
+        git -C "$SRC" apply --check "$PATCH_FILE"
+        git -C "$SRC" apply "$PATCH_FILE"
+    fi
+    comparison=$(mktemp "$WORK/applied.XXXXXX")
+    git -C "$SRC" diff --binary > "$comparison"
+    if ! cmp -s "$PATCH_FILE" "$comparison" \
+        || [ -n "$(git -C "$SRC" ls-files --others --exclude-standard)" ]; then
+        rm -f "$comparison"
+        die "$SRC has changes other than the requested canonical git diff patch"
+    fi
+    rm -f "$comparison"
+    SHORT="$SHORT-$(sha "$PATCH_FILE" | cut -c1-12)"
+else
+    [ -z "$(git -C "$SRC" status --porcelain)" ] || die "$SRC has local changes"
+fi
+[ "$D3D11_ONLY" -eq 0 ] || SHORT="$SHORT-d3d11"
 log "DXMT $COMMIT ($(git -C "$SRC" describe --always))"
 
 # --- LLVM 15 for x86_64-apple-darwin (ci.yml: setup-llvm-darwin) -----------------------
@@ -160,7 +198,7 @@ if [ ! -f "$LLVM_STAMP" ]; then
         -DLLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO=Off \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -G Ninja > "$WORK/llvm-configure.log"
-    cmake --build "$WORK/llvm-build"
+    cmake --build "$WORK/llvm-build" --parallel "$JOBS"
     cmake --install "$WORK/llvm-build" > /dev/null
     touch "$LLVM_STAMP"
 fi
@@ -195,7 +233,7 @@ if [ ! -f "$SDK/.done-$WINE_COMMIT-$GCENX_SHA256" ]; then
     done
     log "building winebuild and import libraries"
     # shellcheck disable=SC2086
-    make -C "$WBUILD" -j"$(sysctl -n hw.ncpu)" $targets > "$WORK/wine-make.log"
+    make -C "$WBUILD" -j"$JOBS" $targets > "$WORK/wine-make.log"
 
     archive="$WORK/downloads/$GCENX_ARCHIVE_NAME"
     if [ ! -f "$archive" ] || [ "$(sha "$archive")" != "$GCENX_SHA256" ]; then
@@ -230,19 +268,21 @@ INSTALL="$WORK/install-$SHORT"
 rm -rf "$INSTALL" "$WORK/build64-$SHORT" "$WORK/build32-$SHORT"
 cd "$SRC"
 
-log "building x86_64 PE + unixlib (d3d12 enabled)"
-meson setup --cross-file build-win64.txt -Denable_nvapi=true -Denable_nvngx=true \
-    -Denable_d3d12=true -Dnative_llvm_path="$LLVM" -Dwine_install_path="$SDK" \
+extras=true
+[ "$D3D11_ONLY" -eq 0 ] || extras=false
+log "building x86_64 PE + unixlib (d3d12/nvapi/nvngx: $extras)"
+meson setup --cross-file build-win64.txt -Denable_nvapi="$extras" -Denable_nvngx="$extras" \
+    -Denable_d3d12="$extras" -Dnative_llvm_path="$LLVM" -Dwine_install_path="$SDK" \
     "$WORK/build64-$SHORT" --buildtype release --prefix "$INSTALL" --strip \
     > "$WORK/meson-setup64.log"
-meson compile -C "$WORK/build64-$SHORT"
+meson compile -C "$WORK/build64-$SHORT" -j "$JOBS"
 meson install -C "$WORK/build64-$SHORT" > /dev/null
 
 log "building i386 PE"
 meson setup --cross-file build-win32.txt -Dwine_install_path="$SDK" \
     "$WORK/build32-$SHORT" --buildtype release --prefix "$INSTALL" --strip \
     > "$WORK/meson-setup32.log"
-meson compile -C "$WORK/build32-$SHORT"
+meson compile -C "$WORK/build32-$SHORT" -j "$JOBS"
 meson install -C "$WORK/build32-$SHORT" > /dev/null
 
 # --- package ---------------------------------------------------------------------------
@@ -253,7 +293,9 @@ mkdir -p "$TREE/x86_64-unix" "$TREE/x86_64-windows" "$TREE/i386-windows" \
          "$TREE/x86_64-windows-d3d12"
 
 files="x86_64-unix/winemetal.so"
-for dll in d3d10core d3d11 dxgi winemetal nvapi64 nvngx; do
+windows_dlls="d3d10core d3d11 dxgi winemetal"
+[ "$D3D11_ONLY" -eq 1 ] || windows_dlls="$windows_dlls nvapi64 nvngx"
+for dll in $windows_dlls; do
     files="$files x86_64-windows/$dll.dll"
 done
 for dll in d3d10core d3d11 dxgi winemetal; do
@@ -263,9 +305,11 @@ for f in $files; do
     [ -f "$INSTALL/$f" ] || die "build did not produce $f"
     cp "$INSTALL/$f" "$TREE/$f"
 done
-[ -f "$INSTALL/x86_64-windows/d3d12.dll" ] || die "build did not produce d3d12.dll"
-cp "$INSTALL/x86_64-windows/d3d12.dll" "$TREE/x86_64-windows-d3d12/d3d12.dll"
-files="$files x86_64-windows-d3d12/d3d12.dll"
+if [ "$D3D11_ONLY" -eq 0 ]; then
+    [ -f "$INSTALL/x86_64-windows/d3d12.dll" ] || die "build did not produce d3d12.dll"
+    cp "$INSTALL/x86_64-windows/d3d12.dll" "$TREE/x86_64-windows-d3d12/d3d12.dll"
+    files="$files x86_64-windows-d3d12/d3d12.dll"
+fi
 
 # Wine refuses to treat a PE as builtin without the marker winebuild --builtin writes.
 for f in $files; do
@@ -293,9 +337,7 @@ done
 # License texts beside the binaries, so a direct download (FreeEngine, not only the
 # installer path) carries them too: LGPL-2.1-or-later since ec357fd (v0.80 was the last
 # MIT release).
-cp "$repo/installer/licenses/COPYING.LIB.dxmt" "$TREE/COPYING.LIB"
-cp "$repo/installer/licenses/LICENSE.dxmt" "$TREE/LICENSE"
-cp "$repo/installer/licenses/LICENSE.dxmt-old" "$TREE/LICENSE-0.80-and-earlier.txt"
+python3 "$here/package-dxmt-licenses.py" "$SRC" "$WORK/llvm-project/llvm" "$TREE"
 
 # Same modes as the release, fixed owners and times, sorted entries and no macOS
 # metadata, so the same binaries always give the same tarball.
@@ -331,6 +373,24 @@ mkdir -p "$SRC_TREE"
 ( cd "$SRC" && find . -name .git -prune -o -type f -print ) | sed 's#^\./##' > "$OUT/.srclist"
 ( cd "$SRC" && tar -cf - -T "$OUT/.srclist" ) | tar -x -C "$SRC_TREE"
 rm -f "$OUT/.srclist"
+mkdir -p "$SRC_TREE/bridgeplay-build/scripts"
+cp "$here/build-dxmt.sh" "$here/package-dxmt-licenses.py" "$SRC_TREE/bridgeplay-build/scripts/"
+if [ -n "$PATCH_FILE" ]; then
+    cp "$PATCH_FILE" "$SRC_TREE/bridgeplay-build/buffer-bounds.patch"
+fi
+patch_digest=none
+[ -z "$PATCH_FILE" ] || patch_digest="$(sha "$PATCH_FILE")"
+cat > "$SRC_TREE/bridgeplay-build/README.txt" <<EOF
+DXMT source: $COMMIT
+LLVM source: https://github.com/llvm/llvm-project at $LLVM_COMMIT
+Wine SDK source: https://github.com/wine-mirror/wine at $WINE_COMMIT
+Patch sha256: $patch_digest
+D3D11-only build: $D3D11_ONLY
+
+The parent directory contains the exact patched DXMT sources used for this build.
+The scripts directory contains the dependency pins and build/package recipe.
+The patch is already applied to the parent sources; use it only with a clean checkout.
+EOF
 find "$SRC_TREE" -type d -exec chmod 755 {} +
 find "$SRC_TREE" -type f -exec chmod 644 {} +
 find "$SRC_STAGE" -exec env TZ=UTC touch -h -t "$stamp" {} +
